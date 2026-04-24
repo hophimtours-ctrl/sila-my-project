@@ -46,7 +46,6 @@ export async function Header() {
           logout: "התנתקות",
           accommodations: "מקומות אירוח",
           flights: "טיסות",
-          hotels: "מלונות",
           myFavorites: "המועדפים שלי",
           myBookings: "ההזמנות שלי",
           ownerDashboard: "לוח בעלים",
@@ -69,7 +68,6 @@ export async function Header() {
           logout: "Logout",
           accommodations: "Accommodations",
           flights: "Flights",
-          hotels: "Hotels",
           myFavorites: "My favorites",
           myBookings: "My bookings",
           ownerDashboard: "Owner dashboard",
@@ -197,9 +195,6 @@ export async function Header() {
               />
             </svg>
             <span>{t.flights}</span>
-          </Link>
-          <Link className="transition hover:text-[var(--color-primary-light)]" href="/search?category=hotels">
-            {t.hotels}
           </Link>
           {user && (
             <Link

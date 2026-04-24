@@ -434,7 +434,6 @@ export default async function SearchPage({
   }
   const mapQuery = params.city?.trim() || hotelsRaw[0]?.location || (isHebrew ? "מלונות בישראל" : "Hotels in Israel");
   const mapEmbedSrc = `https://www.google.com/maps?q=${encodeURIComponent(mapQuery)}&output=embed`;
-  const quickDestinationCities = destinations.slice(0, 6);
   const selectedSummaryBadges = [
     ...toArrayParam(params.priceBand)
       .map((band) => PRICE_BAND_FILTER_OPTIONS.find((option) => option.value === band))
@@ -714,15 +713,7 @@ export default async function SearchPage({
 
   return (
     <div className="min-h-screen space-y-8 pb-12">
-      <section
-        className="relative overflow-visible rounded-3xl px-6 py-10 text-white shadow-xl sm:px-10 sm:py-14"
-        style={{
-          backgroundImage:
-            "linear-gradient(135deg, rgba(0,53,128,0.88), rgba(26,115,232,0.7)), url('https://images.unsplash.com/photo-1469474968028-56623f02e42e?auto=format&fit=crop&w=1600&q=80')",
-          backgroundSize: "cover",
-          backgroundPosition: "center",
-        }}
-      >
+      <section className="relative left-1/2 right-1/2 -mx-[50vw] w-screen overflow-visible bg-[var(--color-primary-light)] px-6 py-10 text-white shadow-xl sm:px-10 sm:py-14">
         <div className="mx-auto max-w-5xl">
           <h1 className="text-3xl font-bold tracking-tight sm:text-5xl">
             {isHebrew ? "מצאו את החופשה הבאה שלכם" : "Find your next vacation"}
@@ -788,17 +779,6 @@ export default async function SearchPage({
             </div>
           </form>
 
-          <div className="mt-4 flex flex-wrap gap-2">
-            {quickDestinationCities.map((destination) => (
-              <Link
-                key={`quick-destination-${destination.city}`}
-                href={`/search?city=${encodeURIComponent(destination.city)}`}
-                className="rounded-full border border-white/30 bg-white/10 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-white/20"
-              >
-                {destination.city}
-              </Link>
-            ))}
-          </div>
         </div>
       </section>
 
