@@ -1,0 +1,84 @@
+@import "tailwindcss";
+
+:root {
+  --color-primary: #003580;
+  --color-primary-light: #1a73e8;
+  --color-cta: #ffb700;
+  --color-success: #2ecc71;
+  --color-error: #e74c3c;
+}
+
+.card {
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 8px 20px rgb(0 0 0 / 6%);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: "Alef", "Open Sans", Arial, sans-serif;
+  direction: inherit;
+}
+
+html[dir="rtl"] input,
+html[dir="rtl"] select,
+html[dir="rtl"] textarea {
+  direction: rtl;
+  text-align: right;
+}
+
+html[dir="ltr"] input,
+html[dir="ltr"] select,
+html[dir="ltr"] textarea {
+  direction: ltr;
+  text-align: left;
+}
+
+@keyframes popup-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes popup-scale-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes popup-slide-up {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.search-overlay {
+  animation: popup-fade-in 0.2s ease-out;
+}
+
+.search-popup {
+  animation: popup-scale-in 0.22s ease-out;
+}
+
+@media (max-width: 640px) {
+  .search-popup-mobile {
+    animation: popup-slide-up 0.22s ease-out;
+  }
+}
