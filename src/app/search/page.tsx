@@ -1,10 +1,6 @@
 import Link from "next/link";
 import { cookies } from "next/headers";
-import { BookingStatus, HotelStatus } from "@prisma/client";
 import { differenceInCalendarDays } from "date-fns";
-import { addFavoriteAction, removeFavoriteAction } from "@/app/actions";
-import { getCurrentUser } from "@/lib/auth";
-import { prisma } from "@/lib/db";
 import { formatCurrency } from "@/lib/format";
 import {
   getInventoryDisplayLabel,
@@ -15,6 +11,8 @@ import {
 import { DateRangePicker } from "@/components/date-range-picker";
 import { GuestsSelector } from "@/components/guests-selector";
 import { LANGUAGE_COOKIE_KEY, parseAppLanguage } from "@/lib/i18n";
+import { fetchMockHotels } from "@/lib/mock-hotels-api";
+import type { MockHotel } from "@/lib/mock-hotels";
 
 type SearchPageParams = {
   city?: string;
@@ -207,6 +205,25 @@ function formatDateParam(date: Date) {
   const day = String(date.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
 }
+function mapMockHotelToRawHotel(hotel: MockHotel) {
+  const syntheticReviewCount = Math.max(1, Math.min(8, Math.round(hotel.reviewCount / 140)));
+  return {
+    id: hotel.id,
+    name: hotel.name,
+    location: hotel.location,
+    description: hotel.description,
+    facilities: hotel.facilities,
+    images: hotel.images,
+    roomTypes: hotel.rooms.map((room) => ({
+      id: room.id,
+      pricePerNight: room.pricePerNight,
+      inventory: room.availableRooms,
+      availableInventory: room.availableRooms,
+      isAvailable: room.availableRooms > 0,
+    })),
+    reviews: Array.from({ length: syntheticReviewCount }, () => ({ rating: hotel.rating })),
+  };
+}
 
 export default async function SearchPage({
   searchParams,
@@ -218,7 +235,6 @@ export default async function SearchPage({
   const cookieStore = await cookies();
   const language = parseAppLanguage(cookieStore.get(LANGUAGE_COOKIE_KEY)?.value);
   const isHebrew = language === "he";
-  const currentUser = await getCurrentUser();
   const destinations = POPULAR_DESTINATIONS[language];
   const params = await searchParams;
   const requestedCheckInDate = parseDate(params.checkIn);
@@ -267,13 +283,8 @@ export default async function SearchPage({
   }> = [];
 
   try {
-    hotelsRaw = await prisma.hotel.findMany({
-      where: {
-        status: HotelStatus.APPROVED,
-      },
-      include: { roomTypes: true, reviews: true },
-      orderBy: { createdAt: "desc" },
-    });
+    const mockHotels = await fetchMockHotels({ limit: 50 });
+    hotelsRaw = mockHotels.map((hotel) => mapMockHotelToRawHotel(hotel));
   } catch (error) {
     dataLoadError = true;
     console.error("Failed to load search hotels", error);
@@ -313,30 +324,8 @@ export default async function SearchPage({
         })
         .filter((deal) => deal.basePrice > 0)
     : [];
-  const allRoomTypeIds = hotelsRaw.flatMap((hotel) => hotel.roomTypes.map((roomType) => roomType.id));
-  let overlappingBookings: GroupedBookingCount[] = [];
-  let blockedDates: BlockedHotel[] = [];
-  if (hasRequestedDateRange && requestedCheckInDate && requestedCheckOutDate && allRoomTypeIds.length > 0) {
-    [overlappingBookings, blockedDates] = await Promise.all([
-      prisma.booking.groupBy({
-        by: ["roomTypeId"],
-        where: {
-          roomTypeId: { in: allRoomTypeIds },
-          status: BookingStatus.CONFIRMED,
-          checkIn: { lt: requestedCheckOutDate },
-          checkOut: { gt: requestedCheckInDate },
-        },
-        _count: { _all: true },
-      }),
-      prisma.blockedDate.findMany({
-        where: {
-          hotelId: { in: hotelsRaw.map((hotel) => hotel.id) },
-          date: { gte: requestedCheckInDate, lt: requestedCheckOutDate },
-        },
-        select: { hotelId: true },
-      }),
-    ]);
-  }
+  const overlappingBookings: GroupedBookingCount[] = [];
+  const blockedDates: BlockedHotel[] = [];
   const weekendRange = getUpcomingWeekendRange();
   const weekendCheckInParam = formatDateParam(weekendRange.checkIn);
   const weekendCheckOutParam = formatDateParam(weekendRange.checkOut);
@@ -344,29 +333,8 @@ export default async function SearchPage({
     day: "2-digit",
     month: "2-digit",
   });
-  let weekendOverlappingBookings: GroupedBookingCount[] = [];
-  let weekendBlockedDates: BlockedHotel[] = [];
-  if (showTopDeals && allRoomTypeIds.length > 0) {
-    [weekendOverlappingBookings, weekendBlockedDates] = await Promise.all([
-      prisma.booking.groupBy({
-        by: ["roomTypeId"],
-        where: {
-          roomTypeId: { in: allRoomTypeIds },
-          status: BookingStatus.CONFIRMED,
-          checkIn: { lt: weekendRange.checkOut },
-          checkOut: { gt: weekendRange.checkIn },
-        },
-        _count: { _all: true },
-      }),
-      prisma.blockedDate.findMany({
-        where: {
-          hotelId: { in: hotelsRaw.map((hotel) => hotel.id) },
-          date: { gte: weekendRange.checkIn, lt: weekendRange.checkOut },
-        },
-        select: { hotelId: true },
-      }),
-    ]);
-  }
+  const weekendOverlappingBookings: GroupedBookingCount[] = [];
+  const weekendBlockedDates: BlockedHotel[] = [];
   const overlappingByRoomType = new Map(
     overlappingBookings.map((item) => [item.roomTypeId, item._count._all]),
   );
@@ -611,65 +579,13 @@ export default async function SearchPage({
         .sort((a, b) => a.remainingRooms - b.remainingRooms || a.dealPrice - b.dealPrice)
         .slice(0, 6)
     : [];
-  const favoriteCandidateHotelIds = Array.from(
-    new Set([
-      ...hotels.map((hotel) => hotel.id),
-      ...topDeals.map((deal) => deal.id),
-      ...weekendUrgencyDeals.map((deal) => deal.id),
-    ]),
-  );
-  const favoriteHotelIds = new Set(
-    currentUser && favoriteCandidateHotelIds.length > 0
-      ? (
-          await prisma.favorite.findMany({
-            where: {
-              userId: currentUser.id,
-              hotelId: { in: favoriteCandidateHotelIds },
-            },
-            select: { hotelId: true },
-          })
-        ).map((favorite) => favorite.hotelId)
-      : [],
-  );
-  const renderFavoriteControl = (hotelId: string) => {
-    const isFavorite = favoriteHotelIds.has(hotelId);
-    const ariaLabel = isFavorite
-      ? isHebrew
-        ? "הסרה מהמועדפים"
-        : "Remove from favorites"
-      : isHebrew
-        ? "שמירה למועדפים"
-        : "Save to favorites";
-
-    if (currentUser) {
-      return (
-        <form action={isFavorite ? removeFavoriteAction : addFavoriteAction}>
-          <input type="hidden" name="hotelId" value={hotelId} />
-          <button
-            type="submit"
-            aria-label={ariaLabel}
-            className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-slate-200 bg-white/90 text-slate-500 shadow-sm transition hover:bg-white"
-          >
-            <svg viewBox="0 0 24 24" aria-hidden className={`h-5 w-5 ${isFavorite ? "text-red-500" : ""}`}>
-              <path
-                d="M12.001 20.727 4.93 13.656a4.5 4.5 0 1 1 6.364-6.364l.707.707.707-.707a4.5 4.5 0 1 1 6.364 6.364z"
-                fill={isFavorite ? "currentColor" : "none"}
-                stroke="currentColor"
-                strokeWidth="1.8"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </svg>
-          </button>
-        </form>
-      );
-    }
+  const renderFavoriteControl = (_hotelId?: string) => {
+    void _hotelId;
 
     return (
-      <Link
-        href="/login"
-        aria-label={isHebrew ? "התחברות לשמירה למועדפים" : "Login to save favorites"}
-        className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-slate-200 bg-white/90 text-slate-500 shadow-sm transition hover:bg-white"
+      <span
+        aria-label={isHebrew ? "מועדפים במצב דמו" : "Favorites unavailable in mock mode"}
+        className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-slate-200 bg-white/90 text-slate-400 shadow-sm"
       >
         <svg viewBox="0 0 24 24" aria-hidden className="h-5 w-5">
           <path
@@ -681,7 +597,7 @@ export default async function SearchPage({
             strokeLinejoin="round"
           />
         </svg>
-      </Link>
+      </span>
     );
   };
 

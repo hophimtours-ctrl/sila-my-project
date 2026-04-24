@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/db";
+import { fetchMockHotelById } from "@/lib/mock-hotels-api";
 
 function parseImages(value: unknown): string[] {
   if (!Array.isArray(value)) {
@@ -32,6 +33,73 @@ export default async function HotelGalleryPage({
 }) {
   const { id } = await params;
   const query = await searchParams;
+  if (id.startsWith("mock-hotel-")) {
+    const mockHotel = await fetchMockHotelById(id);
+    if (!mockHotel) {
+      return notFound();
+    }
+
+    const images = mockHotel.images;
+    const selectedImageIndex = parseImageIndex(query.image, images.length);
+    const selectedImage = images[selectedImageIndex] ?? "";
+    const sharedHotelQuery = new URLSearchParams();
+    if (query.checkIn) {
+      sharedHotelQuery.set("checkIn", query.checkIn);
+    }
+    if (query.checkOut) {
+      sharedHotelQuery.set("checkOut", query.checkOut);
+    }
+    if (query.guests) {
+      sharedHotelQuery.set("guests", query.guests);
+    }
+    const hotelDetailsHref = sharedHotelQuery.toString()
+      ? `/hotels/${mockHotel.id}?${sharedHotelQuery.toString()}`
+      : `/hotels/${mockHotel.id}`;
+    const buildImageHref = (imageIndex: number) => {
+      const galleryQuery = new URLSearchParams(sharedHotelQuery);
+      galleryQuery.set("image", String(imageIndex));
+      return `/hotels/${mockHotel.id}/gallery?${galleryQuery.toString()}`;
+    };
+
+    return (
+      <div className="space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h1 className="text-2xl font-bold">גלריית תמונות · {mockHotel.name}</h1>
+          <Link
+            href={hotelDetailsHref}
+            className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+          >
+            חזרה לעמוד המלון
+          </Link>
+        </div>
+
+        {images.length === 0 ? (
+          <div className="rounded-2xl border border-slate-200 bg-white p-6 text-sm text-slate-600">
+            אין תמונות זמינות למלון זה כרגע.
+          </div>
+        ) : (
+          <section className="space-y-3">
+            <div className="overflow-hidden rounded-2xl bg-slate-100">
+              <img src={selectedImage} alt={`${mockHotel.name} - תמונה ${selectedImageIndex + 1}`} className="h-[520px] w-full object-cover" />
+            </div>
+            <div className="grid gap-2 sm:grid-cols-3 lg:grid-cols-5">
+              {images.map((imageUrl, index) => (
+                <Link
+                  key={`${imageUrl}-${index}`}
+                  href={buildImageHref(index)}
+                  className={`block overflow-hidden rounded-xl border ${
+                    index === selectedImageIndex ? "border-[var(--color-primary-light)]" : "border-slate-200"
+                  }`}
+                >
+                  <img src={imageUrl} alt={`${mockHotel.name} - תמונה ${index + 1}`} className="h-28 w-full object-cover" />
+                </Link>
+              ))}
+            </div>
+          </section>
+        )}
+      </div>
+    );
+  }
   const hotel = await prisma.hotel.findUnique({
     where: { id },
     select: {

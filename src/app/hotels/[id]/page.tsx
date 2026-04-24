@@ -5,10 +5,13 @@ import { addFavoriteAction, createBookingAction, removeFavoriteAction } from "@/
 import { getCurrentUser } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { formatCurrency } from "@/lib/format";
+import { fetchMockHotelById } from "@/lib/mock-hotels-api";
+import type { MockHotel } from "@/lib/mock-hotels";
 import {
   getInventoryDisplayLabel,
   getInventoryDisplayState,
   getRemainingInventory,
+  isLowInventory,
   isRoomBookable,
 } from "@/lib/inventory-availability";
 
@@ -260,6 +263,195 @@ function getFacilityIcon(facility: string) {
     </svg>
   );
 }
+function renderMockHotelPage(hotel: MockHotel, query: { checkIn?: string; checkOut?: string; guests?: string }) {
+  const hotelImages = hotel.images;
+  const imagePreview = hotelImages.slice(0, 5);
+  const imageMain = imagePreview[0] ?? "";
+  const imageSecondary = imagePreview.slice(1);
+  const facilities = hotel.facilities;
+  const stars = hotel.stars;
+  const mapQuery = encodeURIComponent(`${hotel.name} ${hotel.location}`);
+  const hotelMapHref = `https://www.google.com/maps/search/?api=1&query=${mapQuery}`;
+  const hotelMapEmbedSrc = `https://www.google.com/maps?q=${mapQuery}&output=embed`;
+  const hotelQuery = new URLSearchParams();
+  if (query.checkIn) {
+    hotelQuery.set("checkIn", query.checkIn);
+  }
+  if (query.checkOut) {
+    hotelQuery.set("checkOut", query.checkOut);
+  }
+  if (query.guests) {
+    hotelQuery.set("guests", query.guests);
+  }
+  const buildGalleryLink = (imageIndex: number) => {
+    const galleryQuery = new URLSearchParams(hotelQuery);
+    galleryQuery.set("image", String(imageIndex));
+    return `/hotels/${hotel.id}/gallery?${galleryQuery.toString()}`;
+  };
+
+  return (
+    <div className="space-y-5">
+      <section className="card p-6">
+        <div className="flex items-start justify-between gap-3">
+          <h1 className="text-3xl font-bold">{hotel.name}</h1>
+          <span
+            aria-label="מועדפים זמינים לאחר חיבור לנתונים אמיתיים"
+            className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 text-slate-400"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden className="h-6 w-6">
+              <path
+                d="M12.001 20.727 4.93 13.656a4.5 4.5 0 1 1 6.364-6.364l.707.707.707-.707a4.5 4.5 0 1 1 6.364 6.364z"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </span>
+        </div>
+        <p className="text-slate-600">{hotel.location}</p>
+        <div className="mt-2 flex flex-wrap items-center gap-3">
+          <div className="flex items-center gap-1 text-amber-500">
+            {Array.from({ length: stars }).map((_, index) => (
+              <svg key={`hotel-star-${index}`} viewBox="0 0 24 24" aria-hidden className="h-4 w-4 fill-current">
+                <path d="m12 3 2.6 5.3 5.9.8-4.3 4.2 1 5.9L12 16.8 6.8 19.2l1-5.9L3.5 9.1l5.9-.8z" />
+              </svg>
+            ))}
+          </div>
+          <span className="rounded-lg bg-blue-50 px-2 py-0.5 text-xs font-semibold text-blue-700">
+            {hotel.rating.toFixed(1)}
+          </span>
+          <a
+            href={hotelMapHref}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-2.5 py-1 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden className="h-3.5 w-3.5">
+              <path
+                d="M12 21s7-5.9 7-11a7 7 0 1 0-14 0c0 5.1 7 11 7 11Z"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+              <circle cx="12" cy="10" r="2.2" fill="none" stroke="currentColor" strokeWidth="1.8" />
+            </svg>
+            <span>הצג במפה</span>
+          </a>
+        </div>
+      </section>
+
+      <section className="card space-y-4 p-4">
+        <div className="flex items-center justify-between gap-3">
+          <h2 className="text-xl font-bold">תמונות המלון</h2>
+          {hotelImages.length > 0 && (
+            <Link
+              href={buildGalleryLink(0)}
+              className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
+            >
+              לכל הגלריה
+            </Link>
+          )}
+        </div>
+
+        {hotelImages.length === 0 ? (
+          <p className="rounded-lg bg-slate-50 p-3 text-sm text-slate-600">טרם נוספו תמונות למלון זה.</p>
+        ) : (
+          <div className="grid gap-2 lg:grid-cols-[2fr_1fr]">
+            <Link href={buildGalleryLink(0)} className="block overflow-hidden rounded-2xl">
+              <img src={imageMain} alt={`${hotel.name} - תמונה ראשית`} className="h-72 w-full object-cover" />
+            </Link>
+            <div className="grid grid-cols-2 gap-2">
+              {imageSecondary.map((imageUrl, index) => (
+                <Link
+                  key={`${imageUrl}-${index}`}
+                  href={buildGalleryLink(index + 1)}
+                  className="block overflow-hidden rounded-2xl"
+                >
+                  <img
+                    src={imageUrl}
+                    alt={`${hotel.name} - תמונה ${index + 2}`}
+                    className="h-36 w-full object-cover"
+                  />
+                </Link>
+              ))}
+              {hotelImages.length > imagePreview.length && (
+                <Link
+                  href={buildGalleryLink(imagePreview.length)}
+                  className="flex h-36 items-center justify-center rounded-2xl border border-slate-200 bg-slate-50 text-sm font-semibold text-slate-700 transition hover:bg-slate-100"
+                >
+                  +{hotelImages.length - imagePreview.length} תמונות נוספות
+                </Link>
+              )}
+            </div>
+          </div>
+        )}
+      </section>
+
+      <section className="card space-y-3 p-4">
+        <h2 className="text-xl font-bold">מיקום המלון</h2>
+        <p className="text-sm text-slate-600">{hotel.location}</p>
+        <iframe
+          title={`מיקום ${hotel.name}`}
+          src={hotelMapEmbedSrc}
+          className="h-64 w-full rounded-xl border border-slate-200"
+          loading="lazy"
+        />
+      </section>
+
+      <section className="card space-y-4 p-5">
+        <h2 className="text-xl font-bold">פרטי המקום</h2>
+        <p className="leading-7 text-slate-700">{hotel.description}</p>
+        <div className="rounded-xl border border-slate-200 bg-white p-3">
+          <h3 className="text-sm font-semibold text-slate-900">המתקנים הפופולריים ביותר</h3>
+          <div className="mt-2 grid gap-x-4 gap-y-2 sm:grid-cols-2 lg:grid-cols-3">
+            {facilities.map((facility) => (
+              <div key={facility} className="flex items-center gap-2 text-[13px] font-medium text-slate-700">
+                <span className="inline-flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-md bg-emerald-50 text-emerald-700">
+                  {getFacilityIcon(facility)}
+                </span>
+                <span className="truncate">{facility}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section className="space-y-3">
+        <h2 className="text-2xl font-bold">סוגי חדרים</h2>
+        {hotel.rooms.map((room) => (
+          <article key={room.id} className="card p-4">
+            {room.photos[0] && (
+              <img
+                src={room.photos[0]}
+                alt={`${room.name} - תמונת חדר`}
+                className="mb-3 h-44 w-full rounded-xl object-cover"
+              />
+            )}
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h3 className="text-lg font-semibold">{room.name}</h3>
+              <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700">
+                {getInventoryDisplayLabel({
+                  state: isLowInventory(room.availableRooms) ? "lowStock" : "available",
+                  remainingInventory: room.availableRooms,
+                  locale: "he",
+                })}
+              </span>
+            </div>
+            <p className="text-sm">עד {room.maxGuests} אורחים</p>
+            <p className="my-2 font-bold text-[var(--color-primary)]">
+              {formatCurrency(room.pricePerNight)} ללילה
+            </p>
+            <p className="text-sm text-slate-600">הזמנות פעילות רק לאחר חיבור לנתוני מלונות אמיתיים.</p>
+          </article>
+        ))}
+      </section>
+    </div>
+  );
+}
 
 export default async function HotelPage({
   params,
@@ -270,6 +462,13 @@ export default async function HotelPage({
 }) {
   const { id } = await params;
   const query = await searchParams;
+  if (id.startsWith("mock-hotel-")) {
+    const mockHotel = await fetchMockHotelById(id);
+    if (!mockHotel) {
+      return notFound();
+    }
+    return renderMockHotelPage(mockHotel, query);
+  }
   const requestedCheckInDate = parseDate(query.checkIn);
   const requestedCheckOutDate = parseDate(query.checkOut);
   const hasRequestedDateRange = Boolean(
