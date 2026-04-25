@@ -34,6 +34,8 @@ export function DateRangePicker({ checkIn, checkOut, language }: DateRangePicker
     return { from, to };
   });
   const hasCompleteRange = Boolean(range?.from && range?.to);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
 
   useEffect(() => {
     function updateCalendarMode() {
@@ -51,7 +53,7 @@ export function DateRangePicker({ checkIn, checkOut, language }: DateRangePicker
         return;
       }
 
-      if (!containerRef.current.contains(event.target as Node) && hasCompleteRange) {
+      if (!containerRef.current.contains(event.target as Node)) {
         setIsOpen(false);
       }
     }
@@ -61,7 +63,7 @@ export function DateRangePicker({ checkIn, checkOut, language }: DateRangePicker
     }
 
     return () => document.removeEventListener("mousedown", handleOutsideClick);
-  }, [hasCompleteRange, isOpen]);
+  }, [isOpen]);
 
   const isHebrew = language === "he";
   const locale = isHebrew ? he : enUS;
@@ -86,16 +88,7 @@ export function DateRangePicker({ checkIn, checkOut, language }: DateRangePicker
 
       <button
         type="button"
-        onClick={() => {
-          if (!isOpen) {
-            setIsOpen(true);
-            return;
-          }
-
-          if (hasCompleteRange) {
-            setIsOpen(false);
-          }
-        }}
+        onClick={() => setIsOpen(true)}
         className="mt-1 flex w-full items-center justify-between gap-2 text-start text-sm text-slate-900 outline-none"
       >
         <span className="truncate">{displayValue}</span>
@@ -116,25 +109,19 @@ export function DateRangePicker({ checkIn, checkOut, language }: DateRangePicker
       </button>
 
       {isOpen && (
-        <div className="absolute left-0 top-[calc(100%+8px)] z-50 w-[min(92vw,760px)] rounded-2xl border border-slate-200 bg-white p-4 shadow-2xl">
+        <div className="fixed left-1/2 top-1/2 z-50 w-[min(92vw,760px)] -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-slate-200 bg-white p-4 shadow-2xl">
           <DayPicker
             mode="range"
             min={1}
             locale={locale}
             dir={direction}
             selected={range}
+            disabled={{ before: today }}
             numberOfMonths={isWideCalendar ? 2 : 1}
             defaultMonth={new Date()}
             pagedNavigation
             onSelect={(nextRange) => {
               setRange(nextRange);
-              if (
-                nextRange?.from &&
-                nextRange?.to &&
-                nextRange.to.getTime() > nextRange.from.getTime()
-              ) {
-                setIsOpen(false);
-              }
             }}
             showOutsideDays
             classNames={{
@@ -153,7 +140,7 @@ export function DateRangePicker({ checkIn, checkOut, language }: DateRangePicker
               week: "mt-1 flex w-full",
               day: "h-10 w-10 p-0 text-sm",
               day_button:
-                "h-10 w-10 rounded-lg text-sm text-slate-700 transition hover:bg-slate-100 hover:text-slate-900",
+                "h-10 w-10 rounded-lg text-sm text-slate-700 transition hover:bg-slate-100 hover:text-slate-900 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-300 disabled:hover:bg-slate-50",
               selected: "bg-[var(--color-primary-light)] text-white hover:bg-[var(--color-primary-light)]",
               range_start:
                 "bg-[var(--color-primary-light)] text-white rounded-l-lg rounded-r-none hover:bg-[var(--color-primary-light)]",
@@ -176,11 +163,7 @@ export function DateRangePicker({ checkIn, checkOut, language }: DateRangePicker
             </button>
             <button
               type="button"
-              onClick={() => {
-                if (hasCompleteRange) {
-                  setIsOpen(false);
-                }
-              }}
+              onClick={() => setRange(range)}
               disabled={!hasCompleteRange}
               className="rounded-lg bg-[var(--color-primary-light)] px-3 py-1.5 text-xs font-semibold text-white transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-50"
             >
@@ -190,8 +173,8 @@ export function DateRangePicker({ checkIn, checkOut, language }: DateRangePicker
           {!hasCompleteRange && (
             <p className="mt-2 text-xs text-slate-500">
               {isHebrew
-                ? "יש לבחור צ׳ק-אין וצ׳ק-אאוט כדי לסגור את התאריכון."
-                : "Select both check-in and check-out to close the calendar."}
+                ? "התאריכון ייסגר בלחיצה מחוץ אליו."
+                : "Click anywhere outside to close the calendar."}
             </p>
           )}
         </div>
