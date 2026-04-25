@@ -64,10 +64,21 @@ export function DateRangePicker({ checkIn, checkOut, language }: DateRangePicker
 
     return () => document.removeEventListener("mousedown", handleOutsideClick);
   }, [isOpen]);
+  useEffect(() => {
+    if (!isOpen) {
+      return;
+    }
+    const originalOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = originalOverflow;
+    };
+  }, [isOpen]);
 
   const isHebrew = language === "he";
   const locale = isHebrew ? he : enUS;
   const direction = getLanguageDirection(language);
+  const isMobileCalendar = !isWideCalendar;
   const checkInValue = range?.from ? format(range.from, "yyyy-MM-dd") : "";
   const checkOutValue = range?.to ? format(range.to, "yyyy-MM-dd") : "";
 
@@ -88,7 +99,7 @@ export function DateRangePicker({ checkIn, checkOut, language }: DateRangePicker
 
       <button
         type="button"
-        onClick={() => setIsOpen(true)}
+        onClick={() => setIsOpen((current) => !current)}
         className="mt-1 flex w-full items-center justify-between gap-2 text-start text-sm text-slate-900 outline-none"
       >
         <span className="truncate">{displayValue}</span>
@@ -109,75 +120,102 @@ export function DateRangePicker({ checkIn, checkOut, language }: DateRangePicker
       </button>
 
       {isOpen && (
-        <div className="fixed left-1/2 top-1/2 z-50 w-[min(92vw,760px)] -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-slate-200 bg-white p-4 shadow-2xl">
-          <DayPicker
-            mode="range"
-            min={1}
-            locale={locale}
-            dir={direction}
-            selected={range}
-            disabled={{ before: today }}
-            numberOfMonths={isWideCalendar ? 2 : 1}
-            defaultMonth={new Date()}
-            pagedNavigation
-            onSelect={(nextRange) => {
-              setRange(nextRange);
-            }}
-            showOutsideDays
-            classNames={{
-              months: "flex flex-col gap-4 lg:flex-row lg:gap-6",
-              month: "space-y-3",
-              caption: "relative flex items-center justify-center pb-2",
-              caption_label: "text-sm font-semibold text-slate-900",
-              nav: "absolute inset-x-0 top-0 flex items-center justify-between",
-              button_previous:
-                "h-8 w-8 rounded-lg text-slate-600 transition hover:bg-slate-100 hover:text-slate-900",
-              button_next:
-                "h-8 w-8 rounded-lg text-slate-600 transition hover:bg-slate-100 hover:text-slate-900",
-              month_grid: "w-full border-collapse",
-              weekdays: "mb-1 flex",
-              weekday: "w-10 text-center text-xs font-medium text-slate-400",
-              week: "mt-1 flex w-full",
-              day: "h-10 w-10 p-0 text-sm",
-              day_button:
-                "h-10 w-10 rounded-lg text-sm text-slate-700 transition hover:bg-slate-100 hover:text-slate-900 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-300 disabled:hover:bg-slate-50",
-              selected: "bg-[var(--color-primary-light)] text-white hover:bg-[var(--color-primary-light)]",
-              range_start:
-                "bg-[var(--color-primary-light)] text-white rounded-l-lg rounded-r-none hover:bg-[var(--color-primary-light)]",
-              range_end:
-                "bg-[var(--color-primary-light)] text-white rounded-r-lg rounded-l-none hover:bg-[var(--color-primary-light)]",
-              range_middle: "bg-blue-50 text-slate-900 rounded-none hover:bg-blue-50",
-              today: "font-semibold text-[var(--color-primary)]",
-              outside: "text-slate-300",
-              disabled: "text-slate-300",
-            }}
+        <>
+          <button
+            type="button"
+            aria-label={isHebrew ? "סגירת תאריכון" : "Close date picker"}
+            onClick={() => setIsOpen(false)}
+            className="fixed inset-0 z-40 bg-black/30"
           />
+          <div
+            className={`fixed z-50 border border-slate-200 bg-white shadow-2xl ${
+              isMobileCalendar
+                ? "inset-x-0 bottom-0 h-[100dvh] rounded-t-3xl p-4 pb-6"
+                : "left-1/2 top-1/2 w-[min(92vw,760px)] -translate-x-1/2 -translate-y-1/2 rounded-2xl p-4"
+            }`}
+          >
+            {isMobileCalendar && (
+              <div className="mb-3 flex justify-center">
+                <span className="h-1.5 w-14 rounded-full bg-slate-300" />
+              </div>
+            )}
+            <DayPicker
+              mode="range"
+              min={1}
+              locale={locale}
+              dir={direction}
+              selected={range}
+              disabled={{ before: today }}
+              numberOfMonths={isWideCalendar ? 2 : 1}
+              defaultMonth={new Date()}
+              pagedNavigation
+              onSelect={(nextRange) => {
+                setRange(nextRange);
+              }}
+              showOutsideDays
+              className={isMobileCalendar ? "overflow-y-auto" : undefined}
+              classNames={{
+                months: "flex flex-col gap-4 lg:flex-row lg:gap-6",
+                month: "space-y-3",
+                caption: "relative flex items-center justify-center pb-2",
+                caption_label: "text-sm font-semibold text-slate-900",
+                nav: "absolute inset-x-0 top-0 flex items-center justify-between",
+                button_previous:
+                  "h-8 w-8 rounded-lg text-slate-600 transition hover:bg-slate-100 hover:text-slate-900",
+                button_next:
+                  "h-8 w-8 rounded-lg text-slate-600 transition hover:bg-slate-100 hover:text-slate-900",
+                month_grid: "w-full border-collapse",
+                weekdays: "mb-1 flex",
+                weekday: "w-10 text-center text-xs font-medium text-slate-400",
+                week: "mt-1 flex w-full",
+                day: "h-10 w-10 p-0 text-sm",
+                day_button:
+                  "h-10 w-10 rounded-lg text-sm text-slate-700 transition hover:bg-slate-100 hover:text-slate-900 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-300 disabled:hover:bg-slate-50",
+                selected: "bg-[var(--color-primary-light)] text-white hover:bg-[var(--color-primary-light)]",
+                range_start:
+                  "bg-[var(--color-primary-light)] text-white rounded-l-lg rounded-r-none hover:bg-[var(--color-primary-light)]",
+                range_end:
+                  "bg-[var(--color-primary-light)] text-white rounded-r-lg rounded-l-none hover:bg-[var(--color-primary-light)]",
+                range_middle: "bg-blue-50 text-slate-900 rounded-none hover:bg-blue-50",
+                today: "font-semibold text-[var(--color-primary)]",
+                outside: "text-slate-300",
+                disabled: "text-slate-300",
+              }}
+            />
 
-          <div className="mt-3 flex items-center justify-between">
-            <button
-              type="button"
-              onClick={() => setRange(undefined)}
-              className="text-xs font-medium text-slate-500 transition hover:text-slate-700"
-            >
-              {isHebrew ? "ניקוי" : "Clear"}
-            </button>
-            <button
-              type="button"
-              onClick={() => setRange(range)}
-              disabled={!hasCompleteRange}
-              className="rounded-lg bg-[var(--color-primary-light)] px-3 py-1.5 text-xs font-semibold text-white transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {isHebrew ? "אישור" : "Apply"}
-            </button>
+            <div className="mt-3 flex items-center justify-between">
+              <button
+                type="button"
+                onClick={() => setRange(undefined)}
+                className="text-xs font-medium text-slate-500 transition hover:text-slate-700"
+              >
+                {isHebrew ? "ניקוי" : "Clear"}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (!hasCompleteRange) {
+                    return;
+                  }
+                  setIsOpen(false);
+                  const parentForm = containerRef.current?.closest("form");
+                  parentForm?.requestSubmit();
+                }}
+                disabled={!hasCompleteRange}
+                className="rounded-lg bg-[var(--color-primary-light)] px-3 py-1.5 text-xs font-semibold text-white transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {isHebrew ? "חיפוש" : "Search"}
+              </button>
+            </div>
+            {!hasCompleteRange && (
+              <p className="mt-2 text-xs text-slate-500">
+                {isHebrew
+                  ? "התאריכון ייסגר בלחיצה מחוץ אליו."
+                  : "Click anywhere outside to close the calendar."}
+              </p>
+            )}
           </div>
-          {!hasCompleteRange && (
-            <p className="mt-2 text-xs text-slate-500">
-              {isHebrew
-                ? "התאריכון ייסגר בלחיצה מחוץ אליו."
-                : "Click anywhere outside to close the calendar."}
-            </p>
-          )}
-        </div>
+        </>
       )}
     </div>
   );
