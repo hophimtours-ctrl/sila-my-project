@@ -14,6 +14,23 @@
   box-shadow: 0 8px 20px rgb(0 0 0 / 6%);
 }
 
+/* Global UI softening: make bar-like elements less rounded */
+.rounded-3xl {
+  border-radius: 1rem;
+}
+
+.rounded-2xl {
+  border-radius: 0.75rem;
+}
+
+.rounded-xl {
+  border-radius: 0.625rem;
+}
+
+.rounded-lg {
+  border-radius: 0.5rem;
+}
+
 * {
   box-sizing: border-box;
 }

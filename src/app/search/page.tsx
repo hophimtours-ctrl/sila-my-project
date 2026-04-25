@@ -36,6 +36,8 @@ type SearchResultHotel = {
   stars: number;
   userScore: string;
   distanceFromCenterKm: number;
+  distanceToBeachKm: number;
+  distanceToNightlifeKm: number;
   isPopularChoice: boolean;
   hasFreeCancellation: boolean;
   ratingLabel: string;
@@ -186,6 +188,16 @@ function getStarRating(averageRating: number) {
 function estimateDistanceFromCenterKm(hotelId: string) {
   const hash = hotelId.split("").reduce((acc, char) => acc + char.charCodeAt(0), 0);
   const value = 0.4 + (hash % 115) / 10;
+  return Math.round(value * 10) / 10;
+}
+function estimateDistanceToBeachKm(hotelId: string) {
+  const hash = hotelId.split("").reduce((acc, char) => acc + char.charCodeAt(0), 0);
+  const value = 0.2 + (hash % 62) / 10;
+  return Math.round(value * 10) / 10;
+}
+function estimateDistanceToNightlifeKm(hotelId: string) {
+  const hash = hotelId.split("").reduce((acc, char) => acc + char.charCodeAt(0), 0);
+  const value = 0.3 + (hash % 88) / 10;
   return Math.round(value * 10) / 10;
 }
 function getUpcomingWeekendRange(baseDate = new Date()) {
@@ -467,6 +479,8 @@ export default async function SearchPage({
     const stars = getStarRating(averageRating);
     const userScore = reviewsCount > 0 ? averageRating.toFixed(1) : isHebrew ? "חדש" : "New";
     const distanceFromCenterKm = estimateDistanceFromCenterKm(hotel.id);
+    const distanceToBeachKm = estimateDistanceToBeachKm(hotel.id);
+    const distanceToNightlifeKm = estimateDistanceToNightlifeKm(hotel.id);
     const normalizedFacilities = Array.isArray(hotel.facilities)
       ? hotel.facilities.map((facility) => asText(facility).trim().toLowerCase()).filter(Boolean)
       : [];
@@ -501,6 +515,8 @@ export default async function SearchPage({
       stars,
       userScore,
       distanceFromCenterKm,
+      distanceToBeachKm,
+      distanceToNightlifeKm,
       isPopularChoice: averageRating >= 4.4 || remainingRooms <= 5,
       hasFreeCancellation,
       ratingLabel: reviewsCount > 0 ? averageRating.toFixed(1) : isHebrew ? "חדש" : "New",
@@ -629,7 +645,7 @@ export default async function SearchPage({
 
   return (
     <div className="min-h-screen space-y-8 pb-12">
-      <section className="relative left-1/2 right-1/2 -mx-[50vw] w-screen overflow-visible bg-[var(--color-primary-light)] px-6 py-10 text-white shadow-xl sm:px-10 sm:py-14">
+      <section className="relative left-1/2 right-1/2 -mt-6 -mx-[50vw] w-screen overflow-visible bg-[var(--color-primary)] px-6 py-10 text-white shadow-xl sm:px-10 sm:py-14">
         <div className="mx-auto max-w-5xl">
           <h1 className="text-3xl font-bold tracking-tight sm:text-5xl">
             {isHebrew ? "מצאו את החופשה הבאה שלכם" : "Find your next vacation"}
@@ -1046,6 +1062,7 @@ export default async function SearchPage({
             <div className="space-y-5">
               {hotels.map((hotel) => {
                 const imageUrl = hotel.images[0] ?? "";
+                const hotelDetailsHref = `/hotels/${hotel.id}${hotelLinkSuffix ? `?${hotelLinkSuffix}` : ""}`;
 
                 return (
                   <article
@@ -1070,31 +1087,100 @@ export default async function SearchPage({
                     <div className="space-y-3 p-5 md:flex md:flex-1 md:flex-col md:space-y-4">
                       <div className="flex items-start justify-between gap-3">
                         <div>
-                          <h3 className="inline-flex items-center gap-2 text-lg font-semibold text-slate-900">
-                            <span>{hotel.name}</span>
-                            <span className="rounded-lg bg-blue-50 px-2 py-0.5 text-[11px] font-semibold text-blue-700">
-                              {hotel.userScore}
-                            </span>
+                          <h3 className="inline-flex items-center gap-2 text-lg font-semibold">
+                            <Link
+                              href={hotelDetailsHref}
+                              className="text-[var(--color-primary-light)] transition hover:text-blue-400 hover:underline"
+                            >
+                              {hotel.name}
+                            </Link>
+                            <Link
+                              href={hotelDetailsHref}
+                              className="inline-flex items-center gap-1 rounded-lg bg-blue-100 px-2.5 py-1 text-sm font-bold text-blue-800 transition hover:bg-blue-200"
+                            >
+                              <svg viewBox="0 0 24 24" aria-hidden className="h-4 w-4">
+                                <path
+                                  d="M12 2 14.9 8.1 22 9.2l-5.2 5.1 1.2 7L12 18l-6 3.3 1.2-7L2 9.2l7.1-1.1z"
+                                  fill="currentColor"
+                                />
+                              </svg>
+                              <span>{hotel.userScore}</span>
+                            </Link>
                           </h3>
                           <div className="mt-1 flex items-center gap-1 text-amber-500">
                             {Array.from({ length: hotel.stars }).map((_, index) => (
-                              <svg key={`star-${hotel.id}-${index}`} viewBox="0 0 24 24" aria-hidden className="h-3.5 w-3.5 fill-current">
+                              <svg key={`star-${hotel.id}-${index}`} viewBox="0 0 24 24" aria-hidden className="h-4 w-4 fill-current">
                                 <path d="m12 3 2.6 5.3 5.9.8-4.3 4.2 1 5.9L12 16.8 6.8 19.2l1-5.9L3.5 9.1l5.9-.8z" />
                               </svg>
                             ))}
                           </div>
                           <p className="text-sm text-slate-500">{hotel.location}</p>
-                          <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                          <Link
+                            href={hotelDetailsHref}
+                            className="mt-1 inline-flex items-center gap-2 text-sm font-semibold text-blue-700 transition hover:text-blue-800"
+                          >
+                            <svg viewBox="0 0 24 24" aria-hidden className="h-5 w-5">
+                              <path
+                                d="M12 2 14.9 8.1 22 9.2l-5.2 5.1 1.2 7L12 18l-6 3.3 1.2-7L2 9.2l7.1-1.1z"
+                                fill="currentColor"
+                              />
+                            </svg>
                             <span>
-                              {isHebrew
-                                ? `ציון משתמשים: ${hotel.userScore}`
-                                : `User score: ${hotel.userScore}`}
+                              {isHebrew ? `ציון גולשים ${hotel.userScore}` : `Guest score ${hotel.userScore}`}
                             </span>
-                            <span>•</span>
-                            <span>
-                              {isHebrew
-                                ? `${hotel.distanceFromCenterKm} ק״מ מהמרכז`
-                                : `${hotel.distanceFromCenterKm} km from center`}
+                          </Link>
+                          <div className="mt-1 flex flex-wrap items-center gap-3 text-xs text-slate-500">
+                            <span className="inline-flex items-center gap-1">
+                              <svg viewBox="0 0 24 24" aria-hidden className="h-3.5 w-3.5">
+                                <path
+                                  d="M12 21s7-5.9 7-11a7 7 0 1 0-14 0c0 5.1 7 11 7 11Z"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth="1.8"
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                />
+                                <circle cx="12" cy="10" r="2.2" fill="none" stroke="currentColor" strokeWidth="1.8" />
+                              </svg>
+                              <span>
+                                {isHebrew
+                                  ? `${hotel.distanceFromCenterKm} ק״מ מהמרכז`
+                                  : `${hotel.distanceFromCenterKm} km from center`}
+                              </span>
+                            </span>
+                            <span className="inline-flex items-center gap-1">
+                              <svg viewBox="0 0 24 24" aria-hidden className="h-3.5 w-3.5">
+                                <path
+                                  d="M3 16c1.1 1 2.2 1.5 3.5 1.5S9 17 10.3 16c1.1 1 2.2 1.5 3.5 1.5s2.5-.5 3.7-1.5c1.1 1 2.2 1.5 3.5 1.5"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth="1.8"
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                />
+                              </svg>
+                              <span>
+                                {isHebrew
+                                  ? `${hotel.distanceToBeachKm} ק״מ מהים`
+                                  : `${hotel.distanceToBeachKm} km from the beach`}
+                              </span>
+                            </span>
+                            <span className="inline-flex items-center gap-1">
+                              <svg viewBox="0 0 24 24" aria-hidden className="h-3.5 w-3.5">
+                                <path
+                                  d="M6 4v8m0 0a3 3 0 0 0 3-3V4M6 12a3 3 0 0 1-3-3V4M13 4h2v8m0 8V4m4 16V10a3 3 0 0 0-3-3"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth="1.8"
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                />
+                              </svg>
+                              <span>
+                                {isHebrew
+                                  ? `${hotel.distanceToNightlifeKm} ק״מ מאזורי בילוי`
+                                  : `${hotel.distanceToNightlifeKm} km from nightlife`}
+                              </span>
                             </span>
                           </div>
                           {hotel.isPopularChoice && (
@@ -1139,7 +1225,7 @@ export default async function SearchPage({
                         </div>
 
                         <Link
-                          href={`/hotels/${hotel.id}${hotelLinkSuffix ? `?${hotelLinkSuffix}` : ""}`}
+                          href={hotelDetailsHref}
                           className="rounded-xl bg-[var(--color-primary-light)] px-4 py-2 text-sm font-semibold text-white transition hover:brightness-105"
                         >
                           {isHebrew ? "צפייה במלון" : "View hotel"}
