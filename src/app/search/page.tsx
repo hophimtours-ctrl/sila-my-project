@@ -1089,7 +1089,7 @@ export default async function SearchPage({
                     key={hotel.id}
                     className="overflow-hidden rounded-2xl bg-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-md md:flex"
                   >
-                    <div className="h-48 w-full bg-slate-200 md:h-auto md:w-72 md:flex-shrink-0">
+                    <div className="relative h-48 w-full bg-slate-200 md:h-auto md:w-72 md:flex-shrink-0">
                       {imageUrl ? (
                         <img
                           src={imageUrl}
@@ -1102,10 +1102,11 @@ export default async function SearchPage({
                           {isHebrew ? "תמונה תתווסף בקרוב" : "Image coming soon"}
                         </div>
                       )}
+                      <div className="absolute right-3 top-3">{renderFavoriteControl(hotel.id)}</div>
                     </div>
 
                     <div className="space-y-3 p-5 md:flex md:flex-1 md:flex-col md:space-y-4">
-                      <div className="flex items-start justify-between gap-3">
+                      <div className="flex items-start gap-3">
                         <div>
                           <h3 className="inline-flex items-center gap-2 text-lg font-semibold">
                             <Link
@@ -1218,9 +1219,6 @@ export default async function SearchPage({
                               })}
                             </p>
                           )}
-                        </div>
-                        <div className="flex items-center gap-2">
-                          {renderFavoriteControl(hotel.id)}
                         </div>
                       </div>
 
