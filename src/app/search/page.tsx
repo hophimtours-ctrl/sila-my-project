@@ -18,7 +18,7 @@ import { MOCK_FAVORITES_COOKIE_KEY, parseMockFavoriteHotelIds } from "@/lib/mock
 import { fetchMockHotels } from "@/lib/mock-hotels-api";
 import type { MockHotel } from "@/lib/mock-hotels";
 
-type SearchPageParams = {
+export type SearchPageParams = {
   category?: string;
   city?: string;
   checkIn?: string;
@@ -28,6 +28,14 @@ type SearchPageParams = {
   star?: string | string[];
   priceBand?: string | string[];
   view?: string;
+};
+type SearchResultsLayout = "gallery" | "horizontal";
+type SearchPageViewProps = {
+  searchParams: Promise<SearchPageParams>;
+  showTopDeals?: boolean;
+  resultsLayout?: SearchResultsLayout;
+  searchActionPath?: string;
+  enableRandomRecommended?: boolean;
 };
 
 type SearchResultHotel = {
@@ -270,10 +278,10 @@ function shuffleItems<T>(items: T[]) {
 export default async function SearchPage({
   searchParams,
   showTopDeals = true,
-}: {
-  searchParams: Promise<SearchPageParams>;
-  showTopDeals?: boolean;
-}) {
+  resultsLayout = "gallery",
+  searchActionPath = "/search/results",
+  enableRandomRecommended = true,
+}: SearchPageViewProps) {
   const cookieStore = await cookies();
   const language = parseAppLanguage(cookieStore.get(LANGUAGE_COOKIE_KEY)?.value);
   const isHebrew = language === "he";
@@ -701,6 +709,7 @@ export default async function SearchPage({
   };
 
   const shouldShowRandomRecommended =
+    enableRandomRecommended &&
     isAccommodationsCategory &&
     !params.city?.trim() &&
     !hasRequestedDateRange &&
@@ -727,6 +736,17 @@ export default async function SearchPage({
       : displayedHotels.length === 1
         ? "1 place to stay found"
         : `${displayedHotels.length} places to stay found`;
+  const isHorizontalResultsLayout = resultsLayout === "horizontal";
+  const resultsCardsContainerClass = isHorizontalResultsLayout
+    ? "space-y-5"
+    : "grid gap-5 sm:grid-cols-2 2xl:grid-cols-3";
+  const defaultResultsViewLabel = isHorizontalResultsLayout
+    ? isHebrew
+      ? "רשימה"
+      : "List"
+    : isHebrew
+      ? "גלריה"
+      : "Gallery";
   const hasActiveSearch = Boolean(params.city?.trim() || hasRequestedDateRange || params.guests?.trim());
   const showAdvancedFilters = hasActiveSearch && displayedHotels.length > 0;
   const footerCities = Array.from(
@@ -753,7 +773,7 @@ export default async function SearchPage({
           </p>
 
           <form
-            action="/search"
+            action={searchActionPath}
             className="relative z-20 mt-8 rounded-2xl border-4 border-[#7cc7ff] bg-gradient-to-b from-[#eaf7ff] to-white p-2 shadow-2xl"
           >
             {params.category && <input type="hidden" name="category" value={params.category} />}
@@ -905,7 +925,7 @@ export default async function SearchPage({
               </p>
             </div>
             <Link
-              href={`/search?${weekendSearchParams.toString()}`}
+              href={`${searchActionPath}?${weekendSearchParams.toString()}`}
               className="rounded-xl border border-rose-200 bg-white px-3 py-2 text-xs font-semibold text-rose-700 transition hover:bg-rose-50"
             >
               {isHebrew ? "לכל דילי הסופ״ש" : "See all weekend deals"}
@@ -1008,7 +1028,7 @@ export default async function SearchPage({
               <p className="mt-1 text-xs text-slate-500">
                 {isHebrew ? "בחרו אפשרויות סינון עם תיבות סימון." : "Select filters using checkboxes."}
               </p>
-              <form action="/search" className="mt-4 space-y-4">
+              <form action={searchActionPath} className="mt-4 space-y-4">
                 {params.category && <input type="hidden" name="category" value={params.category} />}
                 {params.city && <input type="hidden" name="city" value={params.city} />}
                 {params.checkIn && <input type="hidden" name="checkIn" value={params.checkIn} />}
@@ -1084,17 +1104,17 @@ export default async function SearchPage({
               </div>
               <div className="inline-flex overflow-hidden rounded-xl border border-slate-200 bg-white">
                 <Link
-                  href={`/search?${listViewQuery.toString()}`}
+                  href={`${searchActionPath}?${listViewQuery.toString()}`}
                   className={`px-3 py-2 text-xs font-semibold transition ${
                     !isMapView
                       ? "bg-[var(--color-primary-light)] text-white"
                       : "text-slate-700 hover:bg-slate-50"
                   }`}
                 >
-                  {isHebrew ? "גלריה" : "Gallery"}
+                  {defaultResultsViewLabel}
                 </Link>
                 <Link
-                  href={`/search?${mapViewQuery.toString()}`}
+                  href={`${searchActionPath}?${mapViewQuery.toString()}`}
                   className={`border-s border-slate-200 px-3 py-2 text-xs font-semibold transition ${
                     isMapView
                       ? "bg-[var(--color-primary-light)] text-white"
@@ -1107,7 +1127,7 @@ export default async function SearchPage({
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <Link
-                href={`/search?${freeCancellationQuery.toString()}`}
+                href={`${searchActionPath}?${freeCancellationQuery.toString()}`}
                 className={`rounded-full border px-3 py-1 text-xs font-semibold transition ${
                   hasFreeCancellationFilter
                     ? "border-emerald-300 bg-emerald-50 text-emerald-700"
@@ -1157,7 +1177,7 @@ export default async function SearchPage({
               </div>
             )}
 
-            <div className="grid gap-5 sm:grid-cols-2 2xl:grid-cols-3">
+            <div className={resultsCardsContainerClass}>
               {displayedHotels.map((hotel) => {
                 const imageUrl = hotel.images[0] ?? "";
                 const hotelDetailsHref = `/hotels/${hotel.id}${hotelLinkSuffix ? `?${hotelLinkSuffix}` : ""}`;
@@ -1197,6 +1217,7 @@ export default async function SearchPage({
                     requestedNightsLabel={requestedNightsLabel}
                     lowInventoryLabel={lowInventoryLabel}
                     favoriteControl={renderFavoriteControl(hotel.id)}
+                    layout={resultsLayout}
                   />
                 );
               })}

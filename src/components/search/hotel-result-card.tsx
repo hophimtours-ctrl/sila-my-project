@@ -29,6 +29,7 @@ type HotelResultCardProps = {
   requestedNightsLabel: string | null;
   lowInventoryLabel: string | null;
   favoriteControl: ReactNode;
+  layout?: "gallery" | "horizontal";
 };
 
 export function HotelResultCard({
@@ -39,10 +40,24 @@ export function HotelResultCard({
   requestedNightsLabel,
   lowInventoryLabel,
   favoriteControl,
+  layout = "gallery",
 }: HotelResultCardProps) {
+  const isHorizontalLayout = layout === "horizontal";
   return (
-    <article className="flex h-full flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
-      <div className="relative h-52 w-full bg-slate-200">
+    <article
+      className={
+        isHorizontalLayout
+          ? "overflow-hidden rounded-2xl bg-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-md md:flex"
+          : "flex h-full flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
+      }
+    >
+      <div
+        className={
+          isHorizontalLayout
+            ? "relative h-48 w-full bg-slate-200 md:h-auto md:w-72 md:flex-shrink-0"
+            : "relative h-52 w-full bg-slate-200"
+        }
+      >
         {hotel.imageUrl ? (
           <img
             src={hotel.imageUrl}
@@ -57,8 +72,13 @@ export function HotelResultCard({
         )}
         <div className="absolute right-3 top-3">{favoriteControl}</div>
       </div>
-
-      <div className="flex h-full flex-col space-y-3 p-4">
+      <div
+        className={
+          isHorizontalLayout
+            ? "space-y-3 p-5 md:flex md:flex-1 md:flex-col md:space-y-4"
+            : "flex h-full flex-col space-y-3 p-4"
+        }
+      >
         <div className="flex items-start gap-3">
           <div>
             <h3 className="inline-flex items-center gap-2 text-lg font-semibold">
@@ -180,7 +200,7 @@ export function HotelResultCard({
 
         <p className="text-sm leading-6 text-slate-600">{hotel.description}</p>
 
-        <div className="mt-auto flex items-end justify-between gap-3 pt-2">
+        <div className={isHorizontalLayout ? "flex items-end justify-between gap-3 pt-2 md:mt-auto" : "mt-auto flex items-end justify-between gap-3 pt-2"}>
           <div>
             <p className="text-xs text-slate-500">{isHebrew ? "החל מ־" : "From"}</p>
             <p className="text-xl font-bold text-[var(--color-primary-light)]">
