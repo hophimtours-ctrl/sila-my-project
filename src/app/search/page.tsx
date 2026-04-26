@@ -35,6 +35,8 @@ type SearchResultHotel = {
   averageRating: number;
   stars: number;
   userScore: string;
+  reviewCount: number;
+  guestRatingText: string;
   distanceFromCenterKm: number;
   distanceToBeachKm: number;
   distanceToNightlifeKm: number;
@@ -184,6 +186,21 @@ function getStarRating(averageRating: number) {
     return 3;
   }
   return 2;
+}
+function getGuestRatingText(averageRating: number, isHebrew: boolean) {
+  if (averageRating >= 4.8) {
+    return isHebrew ? "יוצא מן הכלל" : "Exceptional";
+  }
+  if (averageRating >= 4.5) {
+    return isHebrew ? "מאוד מאוד טוב" : "Very very good";
+  }
+  if (averageRating >= 4.2) {
+    return isHebrew ? "טוב מאוד" : "Very good";
+  }
+  if (averageRating > 0) {
+    return isHebrew ? "טוב" : "Good";
+  }
+  return isHebrew ? "חדש" : "New";
 }
 function estimateDistanceFromCenterKm(hotelId: string) {
   const hash = hotelId.split("").reduce((acc, char) => acc + char.charCodeAt(0), 0);
@@ -478,6 +495,7 @@ export default async function SearchPage({
       : 0;
     const stars = getStarRating(averageRating);
     const userScore = reviewsCount > 0 ? averageRating.toFixed(1) : isHebrew ? "חדש" : "New";
+    const guestRatingText = getGuestRatingText(averageRating, isHebrew);
     const distanceFromCenterKm = estimateDistanceFromCenterKm(hotel.id);
     const distanceToBeachKm = estimateDistanceToBeachKm(hotel.id);
     const distanceToNightlifeKm = estimateDistanceToNightlifeKm(hotel.id);
@@ -514,6 +532,8 @@ export default async function SearchPage({
       averageRating,
       stars,
       userScore,
+      reviewCount: reviewsCount,
+      guestRatingText,
       distanceFromCenterKm,
       distanceToBeachKm,
       distanceToNightlifeKm,
@@ -1106,6 +1126,11 @@ export default async function SearchPage({
                               </svg>
                               <span>{hotel.userScore}</span>
                             </Link>
+                            <span className="text-xs font-medium text-slate-500">
+                              {isHebrew
+                                ? `${hotel.guestRatingText} · ${hotel.reviewCount} חוות דעת`
+                                : `${hotel.guestRatingText} · ${hotel.reviewCount} reviews`}
+                            </span>
                           </h3>
                           <div className="mt-1 flex items-center gap-1 text-amber-500">
                             {Array.from({ length: hotel.stars }).map((_, index) => (
