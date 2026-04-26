@@ -1,12 +1,14 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { getApp, getApps, initializeApp } from "firebase/app";
 import {
   FacebookAuthProvider,
   GoogleAuthProvider,
   TwitterAuthProvider,
+  getRedirectResult,
   getAuth,
+  signInWithRedirect,
   signInWithPopup,
   signOut,
 } from "firebase/auth";
@@ -25,6 +27,11 @@ const oauthFirebaseConfig = {
   authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
   projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
   appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
+};
+const FIREBASE_PROVIDER_ID_TO_KEY: Record<string, ProviderKey> = {
+  "google.com": "google",
+  "facebook.com": "facebook",
+  "twitter.com": "x",
 };
 
 function getProviderErrorMessage(isHebrew: boolean) {
@@ -59,6 +66,19 @@ function getProviderButtonLabel(isHebrew: boolean, mode: "login" | "register", p
     : mode === "register"
       ? "Sign up with X (Twitter)"
       : "Continue with X (Twitter)";
+}
+
+function shouldFallbackToRedirect(error: unknown) {
+  if (!error || typeof error !== "object" || !("code" in error)) {
+    return false;
+  }
+
+  const errorCode = String(error.code);
+  return (
+    errorCode === "auth/popup-blocked" ||
+    errorCode === "auth/operation-not-supported-in-this-environment" ||
+    errorCode === "auth/web-storage-unsupported"
+  );
 }
 
 function getFirebaseProvider(provider: ProviderKey) {
@@ -112,10 +132,63 @@ export function OAuthSigninButtons({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const isPending = pendingProvider !== null;
+  function submitOAuthToken(idToken: string, provider: ProviderKey) {
+    if (!submitFormRef.current || !idTokenInputRef.current || !providerInputRef.current) {
+      throw new Error("Missing OAuth submit form");
+    }
+
+    idTokenInputRef.current.value = idToken;
+    providerInputRef.current.value = provider;
+    submitFormRef.current.requestSubmit();
+  }
+
+  useEffect(() => {
+    let cancelled = false;
+    const auth = getOAuthFirebaseAuth();
+    if (!auth) {
+      return;
+    }
+
+    async function handleRedirectCompletion() {
+      try {
+        const redirectResult = await getRedirectResult(auth);
+        if (!redirectResult?.user || !redirectResult.providerId || cancelled) {
+          return;
+        }
+
+        const provider = FIREBASE_PROVIDER_ID_TO_KEY[redirectResult.providerId];
+        if (!provider) {
+          return;
+        }
+
+        setPendingProvider(provider);
+        const idToken = await redirectResult.user.getIdToken(true);
+        if (!idToken || cancelled) {
+          throw new Error("Missing OAuth token");
+        }
+
+        submitOAuthToken(idToken, provider);
+      } catch {
+        if (!cancelled) {
+          setPendingProvider(null);
+          setErrorMessage(getProviderErrorMessage(isHebrew));
+        }
+      } finally {
+        await signOut(auth).catch(() => undefined);
+      }
+    }
+
+    void handleRedirectCompletion();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isHebrew]);
 
   async function handleProviderSignin(provider: ProviderKey) {
     setErrorMessage(null);
     setPendingProvider(provider);
+    let shouldSignOutAfterAttempt = true;
 
     try {
       const auth = getOAuthFirebaseAuth();
@@ -123,23 +196,30 @@ export function OAuthSigninButtons({
         throw new Error("Missing Firebase config");
       }
       const authProvider = getFirebaseProvider(provider);
-      const credential = await signInWithPopup(auth, authProvider);
-      const idToken = await credential.user.getIdToken(true);
-
-      if (!idToken || !submitFormRef.current || !idTokenInputRef.current || !providerInputRef.current) {
-        throw new Error("Missing OAuth token");
+      try {
+        const credential = await signInWithPopup(auth, authProvider);
+        const idToken = await credential.user.getIdToken(true);
+        if (!idToken) {
+          throw new Error("Missing OAuth token");
+        }
+        submitOAuthToken(idToken, provider);
+      } catch (error) {
+        if (shouldFallbackToRedirect(error)) {
+          shouldSignOutAfterAttempt = false;
+          await signInWithRedirect(auth, authProvider);
+          return;
+        }
+        throw error;
       }
-
-      idTokenInputRef.current.value = idToken;
-      providerInputRef.current.value = provider;
-      submitFormRef.current.requestSubmit();
     } catch {
       setPendingProvider(null);
       setErrorMessage(getProviderErrorMessage(isHebrew));
     } finally {
-      const auth = getOAuthFirebaseAuth();
-      if (auth) {
-        await signOut(auth).catch(() => undefined);
+      if (shouldSignOutAfterAttempt) {
+        const auth = getOAuthFirebaseAuth();
+        if (auth) {
+          await signOut(auth).catch(() => undefined);
+        }
       }
     }
   }
