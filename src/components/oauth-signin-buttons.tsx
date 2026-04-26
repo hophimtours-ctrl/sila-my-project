@@ -144,14 +144,14 @@ export function OAuthSigninButtons({
 
   useEffect(() => {
     let cancelled = false;
-    const auth = getOAuthFirebaseAuth();
-    if (!auth) {
+    const resolvedAuth = getOAuthFirebaseAuth();
+    if (!resolvedAuth) {
       return;
     }
 
     async function handleRedirectCompletion() {
       try {
-        const redirectResult = await getRedirectResult(auth);
+        const redirectResult = await getRedirectResult(resolvedAuth!);
         if (!redirectResult?.user || !redirectResult.providerId || cancelled) {
           return;
         }
@@ -174,7 +174,7 @@ export function OAuthSigninButtons({
           setErrorMessage(getProviderErrorMessage(isHebrew));
         }
       } finally {
-        await signOut(auth).catch(() => undefined);
+        await signOut(resolvedAuth!).catch(() => undefined);
       }
     }
 

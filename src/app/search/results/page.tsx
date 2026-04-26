@@ -1,4 +1,4 @@
-import SearchPage, { type SearchPageParams } from "../page";
+import { SearchPageView, type SearchPageParams } from "../search-page-view";
 
 type SearchResultsPageProps = {
   searchParams: Promise<SearchPageParams>;
@@ -6,7 +6,7 @@ type SearchResultsPageProps = {
 
 export default function SearchResultsPage({ searchParams }: SearchResultsPageProps) {
   return (
-    <SearchPage
+    <SearchPageView
       searchParams={searchParams}
       showTopDeals={false}
       resultsLayout="horizontal"
