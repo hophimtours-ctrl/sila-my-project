@@ -19,6 +19,7 @@ import { fetchMockHotels } from "@/lib/mock-hotels-api";
 import type { MockHotel } from "@/lib/mock-hotels";
 
 type SearchPageParams = {
+  category?: string;
   city?: string;
   checkIn?: string;
   checkOut?: string;
@@ -257,6 +258,14 @@ function mapMockHotelToRawHotel(hotel: MockHotel) {
     reviews: Array.from({ length: syntheticReviewCount }, () => ({ rating: hotel.rating })),
   };
 }
+function shuffleItems<T>(items: T[]) {
+  const shuffled = [...items];
+  for (let index = shuffled.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(Math.random() * (index + 1));
+    [shuffled[index], shuffled[swapIndex]] = [shuffled[swapIndex], shuffled[index]];
+  }
+  return shuffled;
+}
 
 export default async function SearchPage({
   searchParams,
@@ -274,6 +283,8 @@ export default async function SearchPage({
   );
   const destinations = POPULAR_DESTINATIONS[language];
   const params = await searchParams;
+  const activeCategory = params.category?.trim().toLowerCase() ?? "accommodations";
+  const isAccommodationsCategory = activeCategory === "accommodations";
   const requestedCheckInDate = parseDate(params.checkIn);
   const requestedCheckOutDate = parseDate(params.checkOut);
   const hasRequestedDateRange = Boolean(
@@ -381,6 +392,9 @@ export default async function SearchPage({
   );
   const weekendBlockedHotelIds = new Set(weekendBlockedDates.map((blockedDate) => blockedDate.hotelId));
   const sharedHotelQuery = new URLSearchParams();
+  if (params.category) {
+    sharedHotelQuery.set("category", params.category);
+  }
   if (params.checkIn) {
     sharedHotelQuery.set("checkIn", params.checkIn);
   }
@@ -400,12 +414,24 @@ export default async function SearchPage({
     sharedHotelQuery.append("priceBand", priceBand);
   });
   const hotelLinkSuffix = sharedHotelQuery.toString();
-  const weekendDealQuery = new URLSearchParams({
+  const weekendDealParams = new URLSearchParams({
     checkIn: weekendCheckInParam,
     checkOut: weekendCheckOutParam,
     guests: params.guests ?? "2",
-  }).toString();
+  });
+  const weekendSearchParams = new URLSearchParams({
+    checkIn: weekendCheckInParam,
+    checkOut: weekendCheckOutParam,
+  });
+  if (params.category) {
+    weekendDealParams.set("category", params.category);
+    weekendSearchParams.set("category", params.category);
+  }
+  const weekendDealQuery = weekendDealParams.toString();
   const currentSearchQuery = new URLSearchParams();
+  if (params.category) {
+    currentSearchQuery.set("category", params.category);
+  }
   if (params.city) {
     currentSearchQuery.set("city", params.city);
   }
@@ -674,6 +700,15 @@ export default async function SearchPage({
     );
   };
 
+  const shouldShowRandomRecommended =
+    isAccommodationsCategory &&
+    !params.city?.trim() &&
+    !hasRequestedDateRange &&
+    !params.guests?.trim() &&
+    selectedFacilities.size === 0 &&
+    selectedStars.length === 0 &&
+    selectedPriceBands.size === 0;
+  const displayedHotels = shouldShowRandomRecommended ? shuffleItems(hotels).slice(0, 5) : hotels;
   const resultsTitle = params.city?.trim()
     ? isHebrew
       ? `מקומות אירוח ב${params.city.trim()}`
@@ -681,15 +716,19 @@ export default async function SearchPage({
     : isHebrew
       ? "מקומות אירוח מומלצים"
       : "Recommended places to stay";
-  const summaryText = isHebrew
-    ? hotels.length === 1
-      ? "נמצא מקום אירוח אחד"
-      : `נמצאו ${hotels.length} מקומות אירוח`
-    : hotels.length === 1
-      ? "1 place to stay found"
-      : `${hotels.length} places to stay found`;
+  const summaryText = shouldShowRandomRecommended
+    ? isHebrew
+      ? `מוצגים ${displayedHotels.length} מקומות אירוח מומלצים באופן רנדומלי`
+      : `Showing ${displayedHotels.length} recommended places randomly`
+    : isHebrew
+      ? displayedHotels.length === 1
+        ? "נמצא מקום אירוח אחד"
+        : `נמצאו ${displayedHotels.length} מקומות אירוח`
+      : displayedHotels.length === 1
+        ? "1 place to stay found"
+        : `${displayedHotels.length} places to stay found`;
   const hasActiveSearch = Boolean(params.city?.trim() || hasRequestedDateRange || params.guests?.trim());
-  const showAdvancedFilters = hasActiveSearch && hotels.length > 0;
+  const showAdvancedFilters = hasActiveSearch && displayedHotels.length > 0;
   const footerCities = Array.from(
     new Set([
       ...destinations.map((destination) => destination.city.trim()).filter(Boolean),
@@ -717,6 +756,7 @@ export default async function SearchPage({
             action="/search"
             className="relative z-20 mt-8 rounded-2xl border-4 border-[#7cc7ff] bg-gradient-to-b from-[#eaf7ff] to-white p-2 shadow-2xl"
           >
+            {params.category && <input type="hidden" name="category" value={params.category} />}
             {toArrayParam(params.facility).map((facility) => (
               <input key={`hero-facility-${facility}`} type="hidden" name="facility" value={facility} />
             ))}
@@ -865,7 +905,7 @@ export default async function SearchPage({
               </p>
             </div>
             <Link
-              href={`/search?checkIn=${weekendCheckInParam}&checkOut=${weekendCheckOutParam}`}
+              href={`/search?${weekendSearchParams.toString()}`}
               className="rounded-xl border border-rose-200 bg-white px-3 py-2 text-xs font-semibold text-rose-700 transition hover:bg-rose-50"
             >
               {isHebrew ? "לכל דילי הסופ״ש" : "See all weekend deals"}
@@ -969,6 +1009,7 @@ export default async function SearchPage({
                 {isHebrew ? "בחרו אפשרויות סינון עם תיבות סימון." : "Select filters using checkboxes."}
               </p>
               <form action="/search" className="mt-4 space-y-4">
+                {params.category && <input type="hidden" name="category" value={params.category} />}
                 {params.city && <input type="hidden" name="city" value={params.city} />}
                 {params.checkIn && <input type="hidden" name="checkIn" value={params.checkIn} />}
                 {params.checkOut && <input type="hidden" name="checkOut" value={params.checkOut} />}
@@ -1093,7 +1134,7 @@ export default async function SearchPage({
                   loading="lazy"
                 />
                 <div className="flex flex-wrap gap-2">
-                  {hotels.slice(0, 6).map((hotel) => (
+                  {displayedHotels.slice(0, 6).map((hotel) => (
                     <a
                       key={`map-hotel-${hotel.id}`}
                       href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${hotel.name} ${hotel.location}`)}`}
@@ -1108,7 +1149,7 @@ export default async function SearchPage({
               </section>
             )}
 
-            {hotels.length === 0 && (
+            {displayedHotels.length === 0 && (
               <div className="rounded-2xl bg-white p-8 text-center text-slate-600 shadow-sm">
                 {isHebrew
                   ? "לא נמצאו מקומות אירוח שמתאימים לחיפוש. נסו יעד אחר."
@@ -1117,7 +1158,7 @@ export default async function SearchPage({
             )}
 
             <div className="grid gap-5 sm:grid-cols-2 2xl:grid-cols-3">
-              {hotels.map((hotel) => {
+              {displayedHotels.map((hotel) => {
                 const imageUrl = hotel.images[0] ?? "";
                 const hotelDetailsHref = `/hotels/${hotel.id}${hotelLinkSuffix ? `?${hotelLinkSuffix}` : ""}`;
                 const showOnMapHref = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${hotel.name} ${hotel.location}`)}`;
