@@ -74,7 +74,7 @@ export function HebrewSearchBar({
   return (
     <section className="card border-4 border-[var(--color-cta)] p-3 shadow-2xl">
       <form
-        action="/search"
+        action="/search/results"
         className="grid gap-2 lg:grid-cols-[1.4fr_1fr_1fr_auto] lg:items-stretch"
       >
         <div className="flex min-h-14 items-center gap-2 rounded-xl border border-slate-300 bg-white px-3">
