@@ -1096,7 +1096,7 @@ export default async function SearchPage({
                             </Link>
                             <Link
                               href={hotelDetailsHref}
-                              className="inline-flex items-center gap-1 rounded-lg bg-blue-100 px-2.5 py-1 text-sm font-bold text-blue-800 transition hover:bg-blue-200"
+                              className="inline-flex items-center gap-1 rounded-lg bg-blue-50 px-2.5 py-1 text-sm font-bold text-blue-600 transition hover:bg-blue-100"
                             >
                               <svg viewBox="0 0 24 24" aria-hidden className="h-4 w-4">
                                 <path
@@ -1115,20 +1115,6 @@ export default async function SearchPage({
                             ))}
                           </div>
                           <p className="text-sm text-slate-500">{hotel.location}</p>
-                          <Link
-                            href={hotelDetailsHref}
-                            className="mt-1 inline-flex items-center gap-2 text-sm font-semibold text-blue-700 transition hover:text-blue-800"
-                          >
-                            <svg viewBox="0 0 24 24" aria-hidden className="h-5 w-5">
-                              <path
-                                d="M12 2 14.9 8.1 22 9.2l-5.2 5.1 1.2 7L12 18l-6 3.3 1.2-7L2 9.2l7.1-1.1z"
-                                fill="currentColor"
-                              />
-                            </svg>
-                            <span>
-                              {isHebrew ? `ציון גולשים ${hotel.userScore}` : `Guest score ${hotel.userScore}`}
-                            </span>
-                          </Link>
                           <div className="mt-1 flex flex-wrap items-center gap-3 text-xs text-slate-500">
                             <span className="inline-flex items-center gap-1">
                               <svg viewBox="0 0 24 24" aria-hidden className="h-3.5 w-3.5">

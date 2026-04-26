@@ -426,11 +426,71 @@ export async function logoutAction() {
   await clearSession();
   redirect("/");
 }
+type OAuthProvider = "google" | "facebook" | "x";
 
-async function socialSignInAction(options: {
+type OAuthActionFallbackPath = "/login" | "/register";
+
+const OAUTH_PROVIDER_TO_FIREBASE_PROVIDER_ID: Record<OAuthProvider, string> = {
+  google: "google.com",
+  facebook: "facebook.com",
+  x: "twitter.com",
+};
+
+type FirebaseIdentityToolkitUser = {
+  localId?: string;
+  email?: string;
+  displayName?: string;
+  providerUserInfo?: Array<{ providerId?: string }>;
+};
+
+type FirebaseIdentityToolkitLookupResponse = {
+  users?: FirebaseIdentityToolkitUser[];
+};
+
+async function verifyFirebaseIdentityToken(idToken: string) {
+  const apiKey = process.env.NEXT_PUBLIC_FIREBASE_API_KEY;
+  if (!apiKey) {
+    throw new Error("Missing Firebase web API key");
+  }
+
+  const response = await fetch(
+    `https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${encodeURIComponent(apiKey)}`,
+    {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ idToken }),
+      cache: "no-store",
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error("Firebase token verification failed");
+  }
+
+  const payload = (await response.json()) as FirebaseIdentityToolkitLookupResponse;
+  const user = payload.users?.[0];
+  if (!user) {
+    throw new Error("Missing Firebase user in verification response");
+  }
+
+  return user;
+}
+
+function buildOAuthFallbackEmail(provider: OAuthProvider, localId?: string) {
+  const normalizedLocalId = localId?.trim();
+  if (!normalizedLocalId) {
+    return null;
+  }
+  return `${provider}.${normalizedLocalId}@oauth.bookmenow.local`;
+}
+
+async function completeOAuthSignInAction(options: {
   email: string;
   name: string;
   providerLabel: string;
+  fallbackPath: OAuthActionFallbackPath;
 }) {
   const language = await getAuthActionLanguage();
   let user = await prisma.user.findUnique({
@@ -455,7 +515,7 @@ async function socialSignInAction(options: {
       success: false,
       message: `${options.providerLabel} login blocked`,
     });
-    redirect(`/login?error=${encodeURIComponent(getAuthMessage(language, "blockedAccount"))}`);
+    redirect(`${options.fallbackPath}?error=${encodeURIComponent(getAuthMessage(language, "blockedAccount"))}`);
   }
   const roleAfterOwnerEnforcement = await ensureEnforcedOwnerRole({
     userId: user.id,
@@ -482,28 +542,54 @@ async function socialSignInAction(options: {
   await createSession(user.id);
   redirect("/");
 }
+export async function oauthSignInAction(formData: FormData) {
+  const language = await getAuthActionLanguage();
+  const returnToInput = String(formData.get("returnTo") ?? "").trim();
+  const fallbackPath: OAuthActionFallbackPath = returnToInput === "/register" ? "/register" : "/login";
+  const idToken = String(formData.get("idToken") ?? "").trim();
+  const providerInput = String(formData.get("provider") ?? "").trim().toLowerCase();
 
-export async function googleSignInAction() {
-  await socialSignInAction({
-    email: "google.user@bookmenow.co.il",
-    name: "Google User",
-    providerLabel: "Google",
-  });
-}
+  if (
+    !idToken ||
+    (providerInput !== "google" && providerInput !== "facebook" && providerInput !== "x")
+  ) {
+    redirect(`${fallbackPath}?error=${encodeURIComponent(getAuthMessage(language, "invalidLoginDetails"))}`);
+  }
 
-export async function facebookSignInAction() {
-  await socialSignInAction({
-    email: "facebook.user@bookmenow.co.il",
-    name: "Facebook User",
-    providerLabel: "Facebook",
-  });
-}
+  const provider = providerInput as OAuthProvider;
+  const providerLabel = provider === "google" ? "Google" : provider === "facebook" ? "Facebook" : "X";
 
-export async function xSignInAction() {
-  await socialSignInAction({
-    email: "x.user@bookmenow.co.il",
-    name: "X User",
-    providerLabel: "X",
+  let firebaseUser: FirebaseIdentityToolkitUser;
+  try {
+    firebaseUser = await verifyFirebaseIdentityToken(idToken);
+  } catch {
+    redirect(`${fallbackPath}?error=${encodeURIComponent(getAuthMessage(language, "invalidLoginDetails"))}`);
+  }
+
+  const connectedProviderIds = new Set(
+    (firebaseUser.providerUserInfo ?? [])
+      .map((providerInfo) => providerInfo.providerId?.trim())
+      .filter((providerId): providerId is string => Boolean(providerId)),
+  );
+  const expectedProviderId = OAUTH_PROVIDER_TO_FIREBASE_PROVIDER_ID[provider];
+  if (connectedProviderIds.size > 0 && !connectedProviderIds.has(expectedProviderId)) {
+    redirect(`${fallbackPath}?error=${encodeURIComponent(getAuthMessage(language, "invalidLoginDetails"))}`);
+  }
+
+  const normalizedEmail =
+    firebaseUser.email?.trim().toLowerCase() ??
+    buildOAuthFallbackEmail(provider, firebaseUser.localId);
+  if (!normalizedEmail) {
+    redirect(`${fallbackPath}?error=${encodeURIComponent(getAuthMessage(language, "invalidLoginDetails"))}`);
+  }
+
+  const normalizedName = firebaseUser.displayName?.trim() || `${providerLabel} User`;
+
+  await completeOAuthSignInAction({
+    email: normalizedEmail,
+    name: normalizedName,
+    providerLabel,
+    fallbackPath,
   });
 }
 
