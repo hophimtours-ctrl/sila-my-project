@@ -1,16 +1,5 @@
-import SearchPage from "@/app/search/page";
+import { redirect } from "next/navigation";
 
-type HomeSearchParams = {
-  city?: string;
-  checkIn?: string;
-  checkOut?: string;
-  guests?: string;
-};
-
-export default async function Home({
-  searchParams,
-}: {
-  searchParams: Promise<HomeSearchParams>;
-}) {
-  return <SearchPage searchParams={searchParams} showTopDeals />;
+export default function Home() {
+  redirect("/search?category=accommodations");
 }

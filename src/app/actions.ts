@@ -25,6 +25,12 @@ import {
   syncHotelProviderData,
   testHotelProviderConnection,
 } from "@/lib/hotel-api";
+import {
+  MOCK_FAVORITES_COOKIE_KEY,
+  isMockHotelId,
+  parseMockFavoriteHotelIds,
+  serializeMockFavoriteHotelIds,
+} from "@/lib/mock-favorites";
 
 const authSchema = z.object({
   name: z.string().min(2).optional(),
@@ -722,6 +728,56 @@ export async function removeFavoriteAction(formData: FormData) {
       userId: user.id,
       hotelId,
     },
+  });
+
+  revalidatePath("/search");
+  revalidatePath("/favorites");
+  revalidatePath(`/hotels/${hotelId}`);
+}
+
+export async function addMockFavoriteAction(formData: FormData) {
+  await requireUser();
+  const hotelId = String(formData.get("hotelId") ?? "");
+
+  if (!isMockHotelId(hotelId)) {
+    redirect("/search");
+  }
+
+  const cookieStore = await cookies();
+  const currentIds = parseMockFavoriteHotelIds(cookieStore.get(MOCK_FAVORITES_COOKIE_KEY)?.value);
+  const nextIds = [hotelId, ...currentIds.filter((id) => id !== hotelId)];
+
+  cookieStore.set(MOCK_FAVORITES_COOKIE_KEY, serializeMockFavoriteHotelIds(nextIds), {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+    path: "/",
+    maxAge: 60 * 60 * 24 * 365,
+  });
+
+  revalidatePath("/search");
+  revalidatePath("/favorites");
+  revalidatePath(`/hotels/${hotelId}`);
+}
+
+export async function removeMockFavoriteAction(formData: FormData) {
+  await requireUser();
+  const hotelId = String(formData.get("hotelId") ?? "");
+
+  if (!isMockHotelId(hotelId)) {
+    redirect("/favorites");
+  }
+
+  const cookieStore = await cookies();
+  const currentIds = parseMockFavoriteHotelIds(cookieStore.get(MOCK_FAVORITES_COOKIE_KEY)?.value);
+  const nextIds = currentIds.filter((id) => id !== hotelId);
+
+  cookieStore.set(MOCK_FAVORITES_COOKIE_KEY, serializeMockFavoriteHotelIds(nextIds), {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+    path: "/",
+    maxAge: 60 * 60 * 24 * 365,
   });
 
   revalidatePath("/search");
