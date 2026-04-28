@@ -16,7 +16,7 @@ import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
-import { clearSession, createSession, requireUser } from "@/lib/auth";
+import { clearSession, createSession, requireUser, setSessionProfileImage } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { LANGUAGE_COOKIE_KEY, parseAppLanguage, type AppLanguage } from "@/lib/i18n";
 import {
@@ -358,6 +358,7 @@ export async function registerAction(formData: FormData) {
   });
 
   await createSession(user.id);
+  await setSessionProfileImage(null);
   redirect("/");
 }
 
@@ -425,6 +426,7 @@ export async function loginAction(formData: FormData) {
   });
 
   await createSession(user.id);
+  await setSessionProfileImage(null);
   redirect("/");
 }
 
@@ -446,7 +448,11 @@ type FirebaseIdentityToolkitUser = {
   localId?: string;
   email?: string;
   displayName?: string;
-  providerUserInfo?: Array<{ providerId?: string }>;
+  photoUrl?: string;
+  providerUserInfo?: Array<{
+    providerId?: string;
+    photoUrl?: string;
+  }>;
 };
 
 type FirebaseIdentityToolkitLookupResponse = {
@@ -492,9 +498,36 @@ function buildOAuthFallbackEmail(provider: OAuthProvider, localId?: string) {
   return `${provider}.${normalizedLocalId}@oauth.bookmenow.local`;
 }
 
+function normalizeOAuthProfileImageUrl(photoUrl?: string | null) {
+  const normalizedUrl = photoUrl?.trim();
+  if (!normalizedUrl) {
+    return null;
+  }
+
+  if (!/^https?:\/\//i.test(normalizedUrl)) {
+    return null;
+  }
+
+  return normalizedUrl;
+}
+
+function resolveOAuthProfileImageUrl(
+  firebaseUser: FirebaseIdentityToolkitUser,
+  expectedProviderId: string,
+) {
+  const providerPhotoUrl =
+    firebaseUser.providerUserInfo?.find((providerInfo) => providerInfo.providerId === expectedProviderId)
+      ?.photoUrl ??
+    firebaseUser.providerUserInfo?.find((providerInfo) => Boolean(providerInfo.photoUrl))?.photoUrl ??
+    firebaseUser.photoUrl;
+
+  return normalizeOAuthProfileImageUrl(providerPhotoUrl);
+}
+
 async function completeOAuthSignInAction(options: {
   email: string;
   name: string;
+  profileImageUrl?: string | null;
   providerLabel: string;
   fallbackPath: OAuthActionFallbackPath;
 }) {
@@ -546,6 +579,7 @@ async function completeOAuthSignInAction(options: {
   });
 
   await createSession(user.id);
+  await setSessionProfileImage(options.profileImageUrl);
   redirect("/");
 }
 export async function oauthSignInAction(formData: FormData) {
@@ -590,10 +624,12 @@ export async function oauthSignInAction(formData: FormData) {
   }
 
   const normalizedName = firebaseUser.displayName?.trim() || `${providerLabel} User`;
+  const profileImageUrl = resolveOAuthProfileImageUrl(firebaseUser, expectedProviderId);
 
   await completeOAuthSignInAction({
     email: normalizedEmail,
     name: normalizedName,
+    profileImageUrl,
     providerLabel,
     fallbackPath,
   });

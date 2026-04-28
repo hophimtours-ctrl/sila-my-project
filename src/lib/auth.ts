@@ -5,7 +5,39 @@ import { randomUUID } from "node:crypto";
 import { prisma } from "@/lib/db";
 
 const COOKIE_NAME = "bookmenow_session";
+export const PROFILE_IMAGE_COOKIE_NAME = "bookmenow_profile_image";
 const SESSION_DAYS = 7;
+
+function normalizeProfileImageUrl(profileImageUrl?: string | null) {
+  const normalizedUrl = profileImageUrl?.trim();
+  if (!normalizedUrl) {
+    return null;
+  }
+
+  if (!/^https?:\/\//i.test(normalizedUrl)) {
+    return null;
+  }
+
+  return normalizedUrl;
+}
+
+export async function setSessionProfileImage(profileImageUrl?: string | null) {
+  const cookieStore = await cookies();
+  const normalizedUrl = normalizeProfileImageUrl(profileImageUrl);
+
+  if (!normalizedUrl) {
+    cookieStore.delete(PROFILE_IMAGE_COOKIE_NAME);
+    return;
+  }
+
+  cookieStore.set(PROFILE_IMAGE_COOKIE_NAME, normalizedUrl, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+    expires: new Date(Date.now() + SESSION_DAYS * 24 * 60 * 60 * 1000),
+    path: "/",
+  });
+}
 
 export async function createSession(userId: string) {
   const token = randomUUID();
@@ -38,6 +70,7 @@ export async function clearSession() {
   }
 
   cookieStore.delete(COOKIE_NAME);
+  cookieStore.delete(PROFILE_IMAGE_COOKIE_NAME);
 }
 
 export async function getCurrentUser() {

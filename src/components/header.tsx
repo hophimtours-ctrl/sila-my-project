@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { cookies } from "next/headers";
 import { BookingStatus, HotelStatus, Role } from "@prisma/client";
-import { getCurrentUser } from "@/lib/auth";
+import { getCurrentUser, PROFILE_IMAGE_COOKIE_NAME } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { LANGUAGE_COOKIE_KEY, parseAppLanguage } from "@/lib/i18n";
 import { LanguageSwitcher } from "@/components/language-switcher";
@@ -38,6 +38,11 @@ async function getUnreadAlertsCount(userId: string, role: Role) {
 
 export async function Header() {
   const cookieStore = await cookies();
+  const sessionProfileImageCookie = cookieStore.get(PROFILE_IMAGE_COOKIE_NAME)?.value?.trim();
+  const sessionProfileImageUrl =
+    sessionProfileImageCookie && /^https?:\/\//i.test(sessionProfileImageCookie)
+      ? sessionProfileImageCookie
+      : null;
   const language = parseAppLanguage(cookieStore.get(LANGUAGE_COOKIE_KEY)?.value);
   const t =
     language === "he"
@@ -109,7 +114,8 @@ export async function Header() {
         : t.myBookings
     : t.dashboard;
   const avatarUrl = user
-    ? `https://ui-avatars.com/api/?name=${encodeURIComponent(user.name)}&background=1a73e8&color=ffffff&bold=true&size=64`
+    ? sessionProfileImageUrl ??
+      `https://ui-avatars.com/api/?name=${encodeURIComponent(user.name)}&background=1a73e8&color=ffffff&bold=true&size=64`
     : "";
 
   return (
