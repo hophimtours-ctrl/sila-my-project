@@ -79,6 +79,7 @@ export function DateRangePicker({ checkIn, checkOut, language }: DateRangePicker
   const locale = isHebrew ? he : enUS;
   const direction = getLanguageDirection(language);
   const isMobileCalendar = !isWideCalendar;
+  const visibleMonths = isWideCalendar ? 3 : 1;
   const checkInValue = range?.from ? format(range.from, "yyyy-MM-dd") : "";
   const checkOutValue = range?.to ? format(range.to, "yyyy-MM-dd") : "";
 
@@ -125,13 +126,13 @@ export function DateRangePicker({ checkIn, checkOut, language }: DateRangePicker
             type="button"
             aria-label={isHebrew ? "סגירת תאריכון" : "Close date picker"}
             onClick={() => setIsOpen(false)}
-            className="fixed inset-0 z-40 bg-black/30"
+            className={`fixed inset-0 z-40 ${isMobileCalendar ? "bg-black/20 backdrop-blur-[1px]" : "bg-black/30"}`}
           />
           <div
             className={`fixed z-50 border border-slate-200 bg-white shadow-2xl ${
               isMobileCalendar
-                ? "inset-x-0 bottom-0 h-[100dvh] rounded-t-3xl p-4 pb-6"
-                : "left-1/2 top-1/2 w-[min(92vw,760px)] -translate-x-1/2 -translate-y-1/2 rounded-2xl p-4"
+                ? "inset-x-2 bottom-2 max-h-[78dvh] rounded-2xl p-4 pb-5"
+                : "left-1/2 top-1/2 w-[min(94vw,1120px)] -translate-x-1/2 -translate-y-1/2 rounded-2xl p-5"
             }`}
           >
             {isMobileCalendar && (
@@ -146,17 +147,22 @@ export function DateRangePicker({ checkIn, checkOut, language }: DateRangePicker
               dir={direction}
               selected={range}
               disabled={{ before: today }}
-              numberOfMonths={isWideCalendar ? 2 : 1}
+              numberOfMonths={visibleMonths}
               defaultMonth={new Date()}
               pagedNavigation
+              animate
               onSelect={(nextRange) => {
                 setRange(nextRange);
               }}
               showOutsideDays
-              className={isMobileCalendar ? "overflow-y-auto" : undefined}
+              className={isMobileCalendar ? "max-h-[52dvh] overflow-y-auto pr-1" : undefined}
               classNames={{
-                months: "flex flex-col gap-4 lg:flex-row lg:gap-6",
-                month: "space-y-3",
+                months: isMobileCalendar
+                  ? "flex flex-col gap-4"
+                  : "flex snap-x snap-mandatory flex-nowrap gap-4 overflow-x-auto pb-2",
+                month: isMobileCalendar
+                  ? "space-y-3 rounded-xl border border-slate-100 bg-white p-2"
+                  : "min-w-[280px] snap-start space-y-3 rounded-2xl border border-slate-200 bg-slate-50/70 p-3 shadow-sm",
                 caption: "relative flex items-center justify-center pb-2",
                 caption_label: "text-sm font-semibold text-slate-900",
                 nav: "absolute inset-x-0 top-0 flex items-center justify-between",
