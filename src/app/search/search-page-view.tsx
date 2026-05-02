@@ -1,8 +1,15 @@
 import Link from "next/link";
 import { cookies } from "next/headers";
+import { BookingStatus, HotelStatus } from "@prisma/client";
 import { differenceInCalendarDays } from "date-fns";
-import { addMockFavoriteAction, removeMockFavoriteAction } from "@/app/actions";
+import {
+  addFavoriteAction,
+  addMockFavoriteAction,
+  removeFavoriteAction,
+  removeMockFavoriteAction,
+} from "@/app/actions";
 import { getCurrentUser } from "@/lib/auth";
+import { prisma } from "@/lib/db";
 import { formatCurrency } from "@/lib/format";
 import {
   getInventoryDisplayLabel,
@@ -14,7 +21,11 @@ import { DateRangePicker } from "@/components/date-range-picker";
 import { GuestsSelector } from "@/components/guests-selector";
 import { HotelResultCard } from "@/components/search/hotel-result-card";
 import { LANGUAGE_COOKIE_KEY, parseAppLanguage } from "@/lib/i18n";
-import { MOCK_FAVORITES_COOKIE_KEY, parseMockFavoriteHotelIds } from "@/lib/mock-favorites";
+import {
+  isMockHotelId,
+  MOCK_FAVORITES_COOKIE_KEY,
+  parseMockFavoriteHotelIds,
+} from "@/lib/mock-favorites";
 import { fetchMockHotels } from "@/lib/mock-hotels-api";
 import type { MockHotel } from "@/lib/mock-hotels";
 
@@ -58,6 +69,7 @@ type SearchResultHotel = {
   ratingLabel: string;
   remainingRooms: number;
   hasLowAvailability: boolean;
+  isDemoOnly: boolean;
 };
 
 type TopDeal = {
@@ -83,11 +95,23 @@ type WeekendUrgencyDeal = {
   dealPrice: number;
   urgencyLabel: string;
 };
-type GroupedBookingCount = {
-  roomTypeId: string;
-  _count: { _all: number };
+type RawSearchHotel = {
+  id: string;
+  name: string;
+  location: string;
+  description: string;
+  facilities: unknown;
+  images: unknown;
+  roomTypes: Array<{
+    id: string;
+    pricePerNight: number;
+    inventory: number;
+    availableInventory: number;
+    isAvailable: boolean;
+  }>;
+  reviews: Array<{ rating: number }>;
+  source: "real" | "mock";
 };
-type BlockedHotel = { hotelId: string };
 
 const POPULAR_DESTINATIONS = {
   he: [
@@ -247,7 +271,7 @@ function formatDateParam(date: Date) {
   const day = String(date.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
 }
-function mapMockHotelToRawHotel(hotel: MockHotel) {
+function mapMockHotelToRawHotel(hotel: MockHotel): RawSearchHotel {
   const syntheticReviewCount = Math.max(1, Math.min(8, Math.round(hotel.reviewCount / 140)));
   return {
     id: hotel.id,
@@ -264,6 +288,41 @@ function mapMockHotelToRawHotel(hotel: MockHotel) {
       isAvailable: room.availableRooms > 0,
     })),
     reviews: Array.from({ length: syntheticReviewCount }, () => ({ rating: hotel.rating })),
+    source: "mock",
+  };
+}
+function mapRealHotelToRawHotel(hotel: {
+  id: string;
+  name: string;
+  location: string;
+  description: string;
+  facilities: unknown;
+  images: unknown;
+  roomTypes: Array<{
+    id: string;
+    pricePerNight: number;
+    inventory: number;
+    availableInventory: number;
+    isAvailable: boolean;
+  }>;
+  reviews: Array<{ rating: number }>;
+}): RawSearchHotel {
+  return {
+    id: hotel.id,
+    name: hotel.name,
+    location: hotel.location,
+    description: hotel.description,
+    facilities: hotel.facilities,
+    images: hotel.images,
+    roomTypes: hotel.roomTypes.map((room) => ({
+      id: room.id,
+      pricePerNight: room.pricePerNight,
+      inventory: room.inventory,
+      availableInventory: room.availableInventory,
+      isAvailable: room.isAvailable,
+    })),
+    reviews: hotel.reviews.map((review) => ({ rating: review.rating })),
+    source: "real",
   };
 }
 function shuffleItems<T>(items: T[]) {
@@ -320,30 +379,64 @@ export async function SearchPageView({
     .map((value) => Number(value))
     .filter((value): value is number => Number.isInteger(value) && value >= 1 && value <= 5);
   const selectedPriceBands = new Set(toArrayParam(params.priceBand));
+  const mockInventoryEnabled =
+    process.env.NODE_ENV !== "production" ||
+    process.env.ENABLE_MOCK_HOTELS_IN_SEARCH?.trim() === "true";
   let dataLoadError = false;
-  let hotelsRaw: Array<{
-    id: string;
-    name: string;
-    location: string;
-    description: string;
-    facilities: unknown;
-    images: unknown;
-    roomTypes: Array<{
-      id: string;
-      pricePerNight: number;
-      inventory: number;
-      availableInventory: number;
-      isAvailable: boolean;
-    }>;
-    reviews: Array<{ rating: number }>;
-  }> = [];
+  let hotelsRaw: RawSearchHotel[] = [];
+  let usingMockInventory = false;
+  let realInventoryCount = 0;
+  let mockInventoryCount = 0;
+  const realFavoriteHotelIdSet = new Set<string>();
+  if (currentUser) {
+    const realFavorites = await prisma.favorite.findMany({
+      where: { userId: currentUser.id },
+      select: { hotelId: true },
+    });
+    realFavorites.forEach((favorite) => realFavoriteHotelIdSet.add(favorite.hotelId));
+  }
 
   try {
-    const mockHotels = await fetchMockHotels({ limit: 50 });
-    hotelsRaw = mockHotels.map((hotel) => mapMockHotelToRawHotel(hotel));
+    const realHotels = await prisma.hotel.findMany({
+      where: { status: HotelStatus.APPROVED },
+      include: {
+        roomTypes: {
+          select: {
+            id: true,
+            pricePerNight: true,
+            inventory: true,
+            availableInventory: true,
+            isAvailable: true,
+          },
+        },
+        reviews: { select: { rating: true } },
+      },
+      orderBy: { updatedAt: "desc" },
+      take: 50,
+    });
+    hotelsRaw = realHotels.map((hotel) => mapRealHotelToRawHotel(hotel));
+    realInventoryCount = hotelsRaw.length;
+
+    if (hotelsRaw.length === 0 && mockInventoryEnabled) {
+      const mockHotels = await fetchMockHotels({ limit: 50 });
+      hotelsRaw = mockHotels.map((hotel) => mapMockHotelToRawHotel(hotel));
+      mockInventoryCount = hotelsRaw.length;
+      usingMockInventory = true;
+    }
   } catch (error) {
     dataLoadError = true;
-    console.error("Failed to load search hotels", error);
+    console.error("Failed to load real search hotels", error);
+    if (mockInventoryEnabled) {
+      try {
+        const mockHotels = await fetchMockHotels({ limit: 50 });
+        hotelsRaw = mockHotels.map((hotel) => mapMockHotelToRawHotel(hotel));
+        mockInventoryCount = hotelsRaw.length;
+        usingMockInventory = true;
+        dataLoadError = false;
+      } catch (mockError) {
+        console.error("Failed to load mock search hotels", mockError);
+      }
+    }
   }
 
   const topDealTags = isHebrew
@@ -380,8 +473,6 @@ export async function SearchPageView({
         })
         .filter((deal) => deal.basePrice > 0)
     : [];
-  const overlappingBookings: GroupedBookingCount[] = [];
-  const blockedDates: BlockedHotel[] = [];
   const weekendRange = getUpcomingWeekendRange();
   const weekendCheckInParam = formatDateParam(weekendRange.checkIn);
   const weekendCheckOutParam = formatDateParam(weekendRange.checkOut);
@@ -389,8 +480,66 @@ export async function SearchPageView({
     day: "2-digit",
     month: "2-digit",
   });
-  const weekendOverlappingBookings: GroupedBookingCount[] = [];
-  const weekendBlockedDates: BlockedHotel[] = [];
+  const hotelIds = hotelsRaw.map((hotel) => hotel.id);
+  const roomTypeIds = hotelsRaw.flatMap((hotel) => hotel.roomTypes.map((room) => room.id));
+  const [overlappingBookings, blockedDates] =
+    hasRequestedDateRange &&
+    requestedCheckInDate &&
+    requestedCheckOutDate &&
+    roomTypeIds.length > 0 &&
+    hotelIds.length > 0
+      ? await Promise.all([
+          prisma.booking.groupBy({
+            by: ["roomTypeId"],
+            where: {
+              roomTypeId: { in: roomTypeIds },
+              status: BookingStatus.CONFIRMED,
+              checkIn: { lt: requestedCheckOutDate },
+              checkOut: { gt: requestedCheckInDate },
+            },
+            _count: { _all: true },
+          }),
+          prisma.blockedDate.findMany({
+            where: {
+              hotelId: { in: hotelIds },
+              date: { gte: requestedCheckInDate, lt: requestedCheckOutDate },
+            },
+            select: { hotelId: true },
+          }),
+        ])
+      : [[], []];
+  const [weekendOverlappingBookings, weekendBlockedDates] =
+    roomTypeIds.length > 0 && hotelIds.length > 0
+      ? await Promise.all([
+          prisma.booking.groupBy({
+            by: ["roomTypeId"],
+            where: {
+              roomTypeId: { in: roomTypeIds },
+              status: BookingStatus.CONFIRMED,
+              checkIn: { lt: weekendRange.checkOut },
+              checkOut: { gt: weekendRange.checkIn },
+            },
+            _count: { _all: true },
+          }),
+          prisma.blockedDate.findMany({
+            where: {
+              hotelId: { in: hotelIds },
+              date: { gte: weekendRange.checkIn, lt: weekendRange.checkOut },
+            },
+            select: { hotelId: true },
+          }),
+        ])
+      : [[], []];
+  if (isAccommodationsCategory) {
+    console.info("search_inventory_source", {
+      activeCategory,
+      realInventoryCount,
+      mockInventoryCount,
+      usingMockInventory,
+      mockInventoryEnabled,
+      totalHotelsLoaded: hotelsRaw.length,
+    });
+  }
   const overlappingByRoomType = new Map(
     overlappingBookings.map((item) => [item.roomTypeId, item._count._all]),
   );
@@ -584,6 +733,7 @@ export async function SearchPageView({
       ratingLabel: reviewsCount > 0 ? averageRating.toFixed(1) : isHebrew ? "חדש" : "New",
       remainingRooms,
       hasLowAvailability: isLowInventory(remainingRooms),
+      isDemoOnly: hotel.source === "mock",
     });
 
     return acc;
@@ -658,7 +808,10 @@ export async function SearchPageView({
         .slice(0, 6)
     : [];
   const renderFavoriteControl = (hotelId: string) => {
-    const isFavorite = mockFavoriteHotelIdSet.has(hotelId);
+    const isMockHotel = isMockHotelId(hotelId);
+    const isFavorite = isMockHotel
+      ? mockFavoriteHotelIdSet.has(hotelId)
+      : realFavoriteHotelIdSet.has(hotelId);
 
     if (!currentUser) {
       return (
@@ -681,7 +834,13 @@ export async function SearchPageView({
       );
     }
 
-    const action = isFavorite ? removeMockFavoriteAction : addMockFavoriteAction;
+    const action = isMockHotel
+      ? isFavorite
+        ? removeMockFavoriteAction
+        : addMockFavoriteAction
+      : isFavorite
+        ? removeFavoriteAction
+        : addFavoriteAction;
 
     return (
       <form action={action}>
@@ -758,6 +917,9 @@ export async function SearchPageView({
     ]),
   );
   const footerCompanyName = "BookMeNow";
+  const shouldShowDemoInventoryNotice = isAccommodationsCategory && usingMockInventory;
+  const shouldShowNoRealInventoryNotice =
+    isAccommodationsCategory && !usingMockInventory && realInventoryCount === 0;
 
   return (
     <div className="min-h-screen space-y-8 pb-12">
@@ -1019,6 +1181,20 @@ export async function SearchPageView({
               : "There was a temporary issue loading hotels. Refresh and try again."}
           </div>
         )}
+        {shouldShowDemoInventoryNotice && (
+          <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+            {isHebrew
+              ? "מוצגים כרגע מלונות הדגמה בלבד. הזמנה ותשלום אינם זמינים למלונות אלו."
+              : "Demo-only hotels are currently shown. Booking and payment are not available for these listings."}
+          </div>
+        )}
+        {shouldShowNoRealInventoryNotice && (
+          <div className="rounded-2xl border border-slate-200 bg-white p-4 text-sm text-slate-700">
+            {isHebrew
+              ? "כרגע אין מלאי מלונות אמיתי להזמנה. נסו שוב בעוד כמה דקות."
+              : "No real bookable hotel inventory is currently available. Please try again shortly."}
+          </div>
+        )}
         <div className={showAdvancedFilters ? "grid gap-6 lg:grid-cols-[280px_1fr]" : "space-y-4"}>
           {showAdvancedFilters && (
             <aside className="self-start rounded-2xl border border-slate-200 bg-white p-4 lg:sticky lg:top-24">
@@ -1210,6 +1386,7 @@ export async function SearchPageView({
                       isPopularChoice: hotel.isPopularChoice,
                       hasFreeCancellation: hotel.hasFreeCancellation,
                       hasLowAvailability: hotel.hasLowAvailability,
+                      isDemoOnly: hotel.isDemoOnly,
                     }}
                     hotelDetailsHref={hotelDetailsHref}
                     showOnMapHref={showOnMapHref}

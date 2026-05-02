@@ -19,6 +19,7 @@ export type SearchResultsCardHotel = {
   isPopularChoice: boolean;
   hasFreeCancellation: boolean;
   hasLowAvailability: boolean;
+  isDemoOnly: boolean;
 };
 
 type HotelResultCardProps = {
@@ -180,6 +181,11 @@ export function HotelResultCard({
             {hotel.isPopularChoice && (
               <span className="mt-1 inline-flex rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">
                 {isHebrew ? "בחירה פופולרית" : "Popular choice"}
+              </span>
+            )}
+            {hotel.isDemoOnly && (
+              <span className="mt-1 ms-1 inline-flex rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-700">
+                {isHebrew ? "הדגמה בלבד" : "Demo only"}
               </span>
             )}
             {hotel.hasFreeCancellation && (
