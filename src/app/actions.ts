@@ -20,6 +20,7 @@ import { clearSession, createSession, requireUser, setSessionProfileImage } from
 import { prisma } from "@/lib/db";
 import { LANGUAGE_COOKIE_KEY, parseAppLanguage, type AppLanguage } from "@/lib/i18n";
 import {
+  createRapidBookingForRoom,
   encryptApiKey,
   runAutoRefreshForProviders,
   syncHotelProviderData,
@@ -95,6 +96,19 @@ function parseBooleanValue(value: FormDataEntryValue | null, defaultValue = fals
   }
 
   return String(value) === "true";
+}
+function isRapidProviderConfig(name: string, endpoint: string, hotelsPath: string) {
+  const normalizedName = name.toLowerCase();
+  const normalizedEndpoint = endpoint.toLowerCase();
+  const normalizedPath = hotelsPath.toLowerCase();
+
+  return (
+    normalizedName.includes("rapid") ||
+    normalizedEndpoint.includes("ean.com") ||
+    normalizedEndpoint.includes("expediagroup.com") ||
+    normalizedPath.includes("/properties/content") ||
+    normalizedPath.includes("/properties/availability")
+  );
 }
 
 async function parseUploadedImageFiles(formData: FormData, fieldName: string) {
@@ -637,6 +651,16 @@ export async function oauthSignInAction(formData: FormData) {
 
 export async function createBookingAction(formData: FormData) {
   const user = await requireUser(Role.GUEST);
+  const bookingReturnPathInput = String(formData.get("bookingReturnPath") ?? "").trim();
+  const bookingReturnPath =
+    bookingReturnPathInput.startsWith("/") && !bookingReturnPathInput.startsWith("//")
+      ? bookingReturnPathInput
+      : "";
+  const buildErrorRedirectPath = (fallbackPath: string, message: string) => {
+    const basePath = bookingReturnPath || fallbackPath;
+    const separator = basePath.includes("?") ? "&" : "?";
+    return `${basePath}${separator}error=${encodeURIComponent(message)}`;
+  };
 
   const roomTypeId = String(formData.get("roomTypeId") ?? "");
   const checkIn = new Date(String(formData.get("checkIn") ?? ""));
@@ -644,11 +668,11 @@ export async function createBookingAction(formData: FormData) {
   const guests = Number(formData.get("guests") ?? 1);
 
   if (!roomTypeId || Number.isNaN(checkIn.getTime()) || Number.isNaN(checkOut.getTime())) {
-    redirect("/?error=פרטי הזמנה לא תקינים");
+    redirect(buildErrorRedirectPath("/", "פרטי הזמנה לא תקינים"));
   }
 
   if (checkOut <= checkIn) {
-    redirect("/?error=טווח תאריכים לא תקין");
+    redirect(buildErrorRedirectPath("/", "טווח תאריכים לא תקין"));
   }
 
   const room = await prisma.roomType.findUnique({
@@ -657,16 +681,16 @@ export async function createBookingAction(formData: FormData) {
   });
 
   if (!room || room.hotel.status !== HotelStatus.APPROVED) {
-    redirect("/?error=החדר אינו זמין");
+    redirect(buildErrorRedirectPath("/", "החדר אינו זמין"));
   }
 
   const activeInventory = Math.max(0, Math.min(room.inventory, room.availableInventory));
   if (!room.isAvailable || activeInventory < 1) {
-    redirect(`/hotels/${room.hotelId}?error=החדר אינו זמין כרגע להזמנה`);
+    redirect(buildErrorRedirectPath(`/hotels/${room.hotelId}`, "החדר אינו זמין כרגע להזמנה"));
   }
 
   if (guests > room.maxGuests) {
-    redirect(`/hotels/${room.hotelId}?error=מספר אורחים גבוה מהמותר`);
+    redirect(buildErrorRedirectPath(`/hotels/${room.hotelId}`, "מספר אורחים גבוה מהמותר"));
   }
 
   const overlapping = await prisma.booking.count({
@@ -679,7 +703,7 @@ export async function createBookingAction(formData: FormData) {
   });
 
   if (overlapping >= activeInventory) {
-    redirect(`/hotels/${room.hotelId}?error=החדר תפוס בתאריכים שבחרת`);
+    redirect(buildErrorRedirectPath(`/hotels/${room.hotelId}`, "החדר תפוס בתאריכים שבחרת"));
   }
 
   const blocked = await prisma.blockedDate.findFirst({
@@ -690,11 +714,36 @@ export async function createBookingAction(formData: FormData) {
   });
 
   if (blocked) {
-    redirect(`/hotels/${room.hotelId}?error=המלון חסום באחד התאריכים`);
+    redirect(buildErrorRedirectPath(`/hotels/${room.hotelId}`, "המלון חסום באחד התאריכים"));
   }
 
   const nights = differenceInCalendarDays(checkOut, checkIn);
   const totalPrice = nights * room.pricePerNight;
+  let rapidBookingWarning: string | null = null;
+  let rapidBookingReference: string | null = null;
+
+  if (room.hotel.providerId && room.hotel.externalHotelId && room.externalRoomId) {
+    const rapidResult = await createRapidBookingForRoom({
+      providerId: room.hotel.providerId,
+      externalHotelId: room.hotel.externalHotelId,
+      externalRoomId: room.externalRoomId,
+      checkInDate: checkIn,
+      checkOutDate: checkOut,
+      guests,
+      customerEmail: user.email,
+      customerName: user.name,
+      affiliateReferenceId: `BMN-${randomUUID()}`,
+    });
+
+    if (!rapidResult.success) {
+      if (process.env.RAPID_BOOKING_REQUIRED?.trim() === "true") {
+        redirect(buildErrorRedirectPath(`/hotels/${room.hotelId}`, rapidResult.message));
+      }
+      rapidBookingWarning = rapidResult.message;
+    } else if (rapidResult.itineraryId) {
+      rapidBookingReference = rapidResult.itineraryId;
+    }
+  }
 
   await prisma.booking.create({
     data: {
@@ -709,7 +758,16 @@ export async function createBookingAction(formData: FormData) {
   });
 
   revalidatePath("/bookings");
-  redirect("/bookings?success=ההזמנה הושלמה בהצלחה");
+  const successMessage = rapidBookingReference
+    ? `ההזמנה הושלמה בהצלחה (Rapid ${rapidBookingReference})`
+    : "ההזמנה הושלמה בהצלחה";
+  const bookingRedirectQuery = new URLSearchParams({
+    success: successMessage,
+  });
+  if (rapidBookingWarning) {
+    bookingRedirectQuery.set("warning", rapidBookingWarning);
+  }
+  redirect(`/bookings?${bookingRedirectQuery.toString()}`);
 }
 
 export async function cancelBookingAction(formData: FormData) {
@@ -1488,12 +1546,16 @@ export async function adminCreateProviderAction(formData: FormData) {
   const endpoint = String(formData.get("endpoint") ?? "").trim();
   const hotelsPath = String(formData.get("hotelsPath") ?? "/hotels").trim() || "/hotels";
   const apiKey = String(formData.get("apiKey") ?? "").trim();
+  const apiSecret = String(formData.get("apiSecret") ?? "").trim();
   const enabled = parseBooleanValue(formData.get("enabled"), true);
   const autoRefreshEnabled = parseBooleanValue(formData.get("autoRefreshEnabled"), false);
   const refreshIntervalMinutes = Math.max(1, Number(formData.get("refreshIntervalMinutes") ?? 60));
 
   if (!name || !endpoint || !apiKey) {
     redirect("/admin?tab=integrations&error=Name, endpoint, and API key are required");
+  }
+  if (isRapidProviderConfig(name, endpoint, hotelsPath) && !apiSecret) {
+    redirect("/admin?tab=integrations&error=Rapid provider requires shared secret");
   }
 
   const provider = await prisma.hotelApiProvider.create({
@@ -1502,6 +1564,7 @@ export async function adminCreateProviderAction(formData: FormData) {
       endpoint,
       hotelsPath,
       apiKeyEncrypted: encryptApiKey(apiKey),
+      apiSecretEncrypted: apiSecret ? encryptApiKey(apiSecret) : null,
       enabled,
       autoRefreshEnabled,
       refreshIntervalMinutes,
@@ -1537,6 +1600,7 @@ export async function adminUpdateProviderAction(formData: FormData) {
   const endpoint = String(formData.get("endpoint") ?? "").trim();
   const hotelsPath = String(formData.get("hotelsPath") ?? "/hotels").trim() || "/hotels";
   const apiKey = String(formData.get("apiKey") ?? "").trim();
+  const apiSecret = String(formData.get("apiSecret") ?? "").trim();
   const enabled = parseBooleanValue(formData.get("enabled"), true);
   const autoRefreshEnabled = parseBooleanValue(formData.get("autoRefreshEnabled"), false);
   const refreshIntervalMinutes = Math.max(1, Number(formData.get("refreshIntervalMinutes") ?? 60));
@@ -1549,6 +1613,13 @@ export async function adminUpdateProviderAction(formData: FormData) {
   if (!existingProvider) {
     redirect("/admin?tab=integrations&error=Provider not found");
   }
+  if (
+    isRapidProviderConfig(name, endpoint, hotelsPath) &&
+    !apiSecret &&
+    !existingProvider.apiSecretEncrypted
+  ) {
+    redirect("/admin?tab=integrations&error=Rapid provider requires shared secret");
+  }
 
   await prisma.hotelApiProvider.update({
     where: { id: providerId },
@@ -1557,6 +1628,7 @@ export async function adminUpdateProviderAction(formData: FormData) {
       endpoint,
       hotelsPath,
       ...(apiKey ? { apiKeyEncrypted: encryptApiKey(apiKey) } : {}),
+      ...(apiSecret ? { apiSecretEncrypted: encryptApiKey(apiSecret) } : {}),
       enabled,
       autoRefreshEnabled,
       refreshIntervalMinutes,

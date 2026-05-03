@@ -39,7 +39,7 @@ export function DateRangeCalendarPopup({
 
   const months = useMemo(() => {
     const firstMonth = startOfMonth(new Date());
-    return Array.from({ length: 12 }, (_, index) => addMonths(firstMonth, index));
+    return Array.from({ length: 2 }, (_, index) => addMonths(firstMonth, index));
   }, []);
 
   const onDateClick = (clickedDate: Date) => {
@@ -62,7 +62,7 @@ export function DateRangeCalendarPopup({
     <div className="search-overlay fixed inset-0 z-50 bg-slate-900/35 sm:p-6" onClick={onClose}>
       <div
         className={clsx(
-          "search-popup search-popup-mobile flex h-full w-full flex-col bg-white p-4 sm:mx-auto sm:h-auto sm:max-h-[88vh] sm:max-w-4xl sm:rounded-3xl sm:p-6",
+          "search-popup search-popup-mobile flex h-full w-full flex-col bg-white p-4 sm:mx-auto sm:h-auto sm:max-h-[88vh] sm:max-w-[760px] sm:rounded-3xl sm:p-6",
         )}
         onClick={(event) => event.stopPropagation()}
       >
@@ -90,8 +90,11 @@ export function DateRangeCalendarPopup({
               });
 
               return (
-                <section key={monthStart.toISOString()}>
-                  <h4 className="mb-4 text-right text-base font-semibold text-slate-900">
+                <section
+                  key={monthStart.toISOString()}
+                  className="rounded-2xl border border-slate-200 bg-slate-50/60 p-4 shadow-sm"
+                >
+                  <h4 className="mb-4 border-b border-slate-200 pb-3 text-right text-base font-semibold text-slate-900">
                     {format(monthStart, "LLLL yyyy", { locale: he })}
                   </h4>
                   <div className="mb-2 grid grid-cols-7 gap-1 text-center text-xs text-slate-500">

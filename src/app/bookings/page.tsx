@@ -7,7 +7,7 @@ import { formatCurrency, formatDate } from "@/lib/format";
 export default async function BookingsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ success?: string }>;
+  searchParams: Promise<{ success?: string; warning?: string }>;
 }) {
   const user = await requireUser(Role.GUEST);
   const params = await searchParams;
@@ -62,6 +62,7 @@ export default async function BookingsPage({
     <div className="space-y-4">
       <h1 className="text-2xl font-bold">ההזמנות שלי</h1>
       {params.success && <p className="rounded-lg bg-green-50 p-3 text-green-700">{params.success}</p>}
+      {params.warning && <p className="rounded-lg bg-amber-50 p-3 text-amber-800">{params.warning}</p>}
       <section className="space-y-3">
         <h2 className="text-lg font-semibold text-slate-900">נסיעות עתידיות</h2>
         {upcomingBookings.length === 0 ? (

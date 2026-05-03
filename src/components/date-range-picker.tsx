@@ -79,7 +79,7 @@ export function DateRangePicker({ checkIn, checkOut, language }: DateRangePicker
   const locale = isHebrew ? he : enUS;
   const direction = getLanguageDirection(language);
   const isMobileCalendar = !isWideCalendar;
-  const visibleMonths = isWideCalendar ? 3 : 1;
+  const visibleMonths = 2;
   const checkInValue = range?.from ? format(range.from, "yyyy-MM-dd") : "";
   const checkOutValue = range?.to ? format(range.to, "yyyy-MM-dd") : "";
 
@@ -132,7 +132,7 @@ export function DateRangePicker({ checkIn, checkOut, language }: DateRangePicker
             className={`fixed z-50 border border-slate-200 bg-white shadow-2xl ${
               isMobileCalendar
                 ? "inset-x-2 bottom-2 max-h-[78dvh] rounded-2xl p-4 pb-5"
-                : "left-1/2 top-1/2 w-[min(94vw,1120px)] -translate-x-1/2 -translate-y-1/2 rounded-2xl p-5"
+                : "left-1/2 top-1/2 w-[min(94vw,760px)] -translate-x-1/2 -translate-y-1/2 rounded-2xl p-5"
             }`}
           >
             {isMobileCalendar && (

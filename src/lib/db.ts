@@ -15,9 +15,14 @@ function resolveDatabaseUrl() {
   }
 
   const rawPath = configuredUrl.replace("file:", "");
+  const normalizedRelativePath = rawPath.replace(/^[.\\/]+/, "");
+  const schemaRelativePath = path.join(process.cwd(), "prisma", normalizedRelativePath);
+  const cwdRelativePath = path.join(process.cwd(), rawPath);
   const resolvedPath = path.isAbsolute(rawPath)
     ? rawPath
-    : path.join(process.cwd(), rawPath);
+    : fs.existsSync(schemaRelativePath)
+      ? schemaRelativePath
+      : cwdRelativePath;
   const bundledDbPath = path.join(process.cwd(), "prisma", "dev.db");
 
   fs.mkdirSync(path.dirname(resolvedPath), { recursive: true });

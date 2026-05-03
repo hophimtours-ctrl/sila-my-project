@@ -22,8 +22,8 @@
     ],
     "redirects": [
       {
-        "source": "**",
-        "destination": "https://my-web-app--bookmenow-7f4f2.us-east4.hosted.app",
+        "source": "/:path*",
+        "destination": "https://my-web-app--bookmenow-7f4f2.us-east4.hosted.app/:path",
         "type": 302
       }
     ]

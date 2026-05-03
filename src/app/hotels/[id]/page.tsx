@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { BookingStatus } from "@prisma/client";
-import { addFavoriteAction, createBookingAction, removeFavoriteAction } from "@/app/actions";
+import { addFavoriteAction, removeFavoriteAction } from "@/app/actions";
 import { getCurrentUser } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { formatCurrency } from "@/lib/format";
@@ -836,7 +836,7 @@ export default async function HotelPage({
               {formatCurrency(room.pricePerNight)} ללילה
             </p>
             {user?.role === "GUEST" && isBookable ? (
-              <form action={createBookingAction} className="grid gap-2 md:grid-cols-4">
+              <form action="/bookings/payment" method="get" className="grid gap-2 md:grid-cols-4">
                 <input type="hidden" name="roomTypeId" value={room.id} />
                 <input
                   name="checkIn"
@@ -860,7 +860,9 @@ export default async function HotelPage({
                   defaultValue={query.guests ? Number(query.guests) : 1}
                   className="rounded-lg border p-2"
                 />
-                <button className="rounded-lg bg-[var(--color-cta)] p-2 font-bold">בחר חדר</button>
+                <button className="rounded-lg bg-[var(--color-cta)] p-2 font-bold">
+                  הזמן עכשיו
+                </button>
               </form>
             ) : user?.role === "GUEST" ? (
               <p className="text-sm font-medium text-red-600">אין זמינות לחדר זה בתאריכים שנבחרו.</p>
