@@ -35,6 +35,7 @@ export type SearchPageParams = {
   checkIn?: string;
   checkOut?: string;
   guests?: string;
+  provider?: string;
   facility?: string | string[];
   star?: string | string[];
   priceBand?: string | string[];
@@ -379,9 +380,11 @@ export async function SearchPageView({
     .map((value) => Number(value))
     .filter((value): value is number => Number.isInteger(value) && value >= 1 && value <= 5);
   const selectedPriceBands = new Set(toArrayParam(params.priceBand));
+  const requestedProvider = params.provider?.trim().toLowerCase() ?? "";
   const mockInventoryEnabled =
     process.env.NODE_ENV !== "production" ||
     process.env.ENABLE_MOCK_HOTELS_IN_SEARCH?.trim() === "true";
+  const shouldIncludeApiMockInventory = mockInventoryEnabled || Boolean(requestedProvider);
   let dataLoadError = false;
   let hotelsRaw: RawSearchHotel[] = [];
   let usingMockInventory = false;
@@ -417,18 +420,19 @@ export async function SearchPageView({
     hotelsRaw = realHotels.map((hotel) => mapRealHotelToRawHotel(hotel));
     realInventoryCount = hotelsRaw.length;
 
-    if (hotelsRaw.length === 0 && mockInventoryEnabled) {
-      const mockHotels = await fetchMockHotels({ limit: 50 });
-      hotelsRaw = mockHotels.map((hotel) => mapMockHotelToRawHotel(hotel));
-      mockInventoryCount = hotelsRaw.length;
-      usingMockInventory = true;
+    if (shouldIncludeApiMockInventory) {
+      const mockHotels = await fetchMockHotels({ limit: 50, provider: requestedProvider || undefined });
+      const mappedMockHotels = mockHotels.map((hotel) => mapMockHotelToRawHotel(hotel));
+      hotelsRaw = hotelsRaw.length === 0 ? mappedMockHotels : [...hotelsRaw, ...mappedMockHotels];
+      mockInventoryCount = mappedMockHotels.length;
+      usingMockInventory = mappedMockHotels.length > 0;
     }
   } catch (error) {
     dataLoadError = true;
     console.error("Failed to load real search hotels", error);
-    if (mockInventoryEnabled) {
+    if (shouldIncludeApiMockInventory) {
       try {
-        const mockHotels = await fetchMockHotels({ limit: 50 });
+        const mockHotels = await fetchMockHotels({ limit: 50, provider: requestedProvider || undefined });
         hotelsRaw = mockHotels.map((hotel) => mapMockHotelToRawHotel(hotel));
         mockInventoryCount = hotelsRaw.length;
         usingMockInventory = true;
@@ -561,6 +565,9 @@ export async function SearchPageView({
   if (params.guests) {
     sharedHotelQuery.set("guests", params.guests);
   }
+  if (params.provider) {
+    sharedHotelQuery.set("provider", params.provider);
+  }
   toArrayParam(params.facility).forEach((facility) => {
     sharedHotelQuery.append("facility", facility);
   });
@@ -600,6 +607,9 @@ export async function SearchPageView({
   }
   if (params.guests) {
     currentSearchQuery.set("guests", params.guests);
+  }
+  if (params.provider) {
+    currentSearchQuery.set("provider", params.provider);
   }
   toArrayParam(params.facility).forEach((facility) => currentSearchQuery.append("facility", facility));
   toArrayParam(params.star).forEach((star) => currentSearchQuery.append("star", star));
@@ -939,6 +949,7 @@ export async function SearchPageView({
             className="relative z-20 mt-8 rounded-2xl border-4 border-[#7cc7ff] bg-gradient-to-b from-[#eaf7ff] to-white p-2 shadow-2xl"
           >
             {params.category && <input type="hidden" name="category" value={params.category} />}
+            {params.provider && <input type="hidden" name="provider" value={params.provider} />}
             {toArrayParam(params.facility).map((facility) => (
               <input key={`hero-facility-${facility}`} type="hidden" name="facility" value={facility} />
             ))}
@@ -1206,6 +1217,7 @@ export async function SearchPageView({
               </p>
               <form action={searchActionPath} className="mt-4 space-y-4">
                 {params.category && <input type="hidden" name="category" value={params.category} />}
+                {params.provider && <input type="hidden" name="provider" value={params.provider} />}
                 {params.city && <input type="hidden" name="city" value={params.city} />}
                 {params.checkIn && <input type="hidden" name="checkIn" value={params.checkIn} />}
                 {params.checkOut && <input type="hidden" name="checkOut" value={params.checkOut} />}
