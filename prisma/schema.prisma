@@ -30,6 +30,14 @@ enum BookingStatus {
   CONFIRMED
   CANCELED
 }
+enum TripPurpose {
+  BUSINESS
+  WORK
+}
+enum BedType {
+  DOUBLE
+  TWIN
+}
 
 enum ProviderStatus {
   ACTIVE
@@ -146,6 +154,7 @@ model RoomType {
   hotelId            String
   externalRoomId     String?
   name               String
+  bedType            BedType   @default(DOUBLE)
   pricePerNight      Float
   maxGuests          Int
   inventory          Int       @default(1)
@@ -226,6 +235,9 @@ model Booking {
   checkIn    DateTime
   checkOut   DateTime
   guests     Int
+  guestNames Json?
+  tripPurpose TripPurpose?
+  specialRequests String?
   totalPrice Float
   status     BookingStatus @default(CONFIRMED)
   createdAt  DateTime      @default(now())

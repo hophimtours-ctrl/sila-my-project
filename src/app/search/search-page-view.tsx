@@ -363,16 +363,6 @@ export async function SearchPageView({
     hasRequestedDateRange && requestedCheckInDate && requestedCheckOutDate
       ? Math.max(0, differenceInCalendarDays(requestedCheckOutDate, requestedCheckInDate))
       : 0;
-  const requestedNightsLabel =
-    requestedNights > 0
-      ? isHebrew
-        ? requestedNights === 1
-          ? "לילה אחד"
-          : `${requestedNights} לילות`
-        : requestedNights === 1
-          ? "1 night"
-          : `${requestedNights} nights`
-      : null;
   const cityQuery = params.city?.trim().toLowerCase() ?? "";
   const selectedFacilities = new Set(toArrayParam(params.facility).map((value) => value.toLowerCase()));
   const selectedStars = toArrayParam(params.star)
@@ -1391,7 +1381,7 @@ export async function SearchPageView({
                     hotelDetailsHref={hotelDetailsHref}
                     showOnMapHref={showOnMapHref}
                     isHebrew={isHebrew}
-                    requestedNightsLabel={requestedNightsLabel}
+                    requestedNights={requestedNights}
                     lowInventoryLabel={lowInventoryLabel}
                     favoriteControl={renderFavoriteControl(hotel.id)}
                     layout={resultsLayout}

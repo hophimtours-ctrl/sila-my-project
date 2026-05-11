@@ -4,6 +4,7 @@ import { differenceInCalendarDays, format } from "date-fns";
 import { redirect } from "next/navigation";
 import { createBookingAction } from "@/app/actions";
 import { requireUser } from "@/lib/auth";
+import { getBedTypeLabel, TRIP_PURPOSE_OPTIONS } from "@/lib/booking-options";
 import { prisma } from "@/lib/db";
 import { formatCurrency, formatDate } from "@/lib/format";
 
@@ -158,6 +159,10 @@ export default async function BookingPaymentPage({
             <dd className="font-semibold">{room.name}</dd>
           </div>
           <div>
+            <dt className="text-slate-500">סוג מיטה</dt>
+            <dd className="font-semibold">{getBedTypeLabel(room.bedType)}</dd>
+          </div>
+          <div>
             <dt className="text-slate-500">צ׳ק-אין</dt>
             <dd className="font-semibold">{formatDate(selectedCheckInDate)}</dd>
           </div>
@@ -216,6 +221,42 @@ export default async function BookingPaymentPage({
           <input type="hidden" name="checkOut" value={checkOutValue} />
           <input type="hidden" name="guests" value={String(selectedGuests)} />
           <input type="hidden" name="bookingReturnPath" value={bookingReturnPath} />
+
+          <div className="space-y-3 rounded-lg border border-slate-200 p-3">
+            <h3 className="text-sm font-semibold text-slate-900">פרטי השהייה</h3>
+            <div className="grid gap-3 md:grid-cols-2">
+              {Array.from({ length: selectedGuests }, (_, index) => (
+                <label key={`guest-name-${index}`} className="space-y-1 text-sm">
+                  <span className="font-medium">שם אורח {index + 1}</span>
+                  <input
+                    name="guestNames"
+                    required={index === 0}
+                    className="w-full rounded-lg border border-slate-300 p-2"
+                    placeholder={index === 0 ? user.name : `אורח ${index + 1}`}
+                    defaultValue={index === 0 ? user.name : ""}
+                  />
+                </label>
+              ))}
+              <label className="space-y-1 text-sm">
+                <span className="font-medium">מטרת הנסיעה</span>
+                <select name="tripPurpose" defaultValue={TRIP_PURPOSE_OPTIONS[0]?.value} className="w-full rounded-lg border border-slate-300 p-2">
+                  {TRIP_PURPOSE_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="space-y-1 text-sm md:col-span-2">
+                <span className="font-medium">בקשות מיוחדות</span>
+                <textarea
+                  name="specialRequests"
+                  className="min-h-24 w-full rounded-lg border border-slate-300 p-2"
+                  placeholder="לדוגמה: קומה גבוהה, מיטת תינוק, הגעה מאוחרת"
+                />
+              </label>
+            </div>
+          </div>
 
           <div className="grid gap-3 md:grid-cols-2">
             <label className="space-y-1 text-sm">

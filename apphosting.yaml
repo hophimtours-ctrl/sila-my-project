@@ -46,6 +46,30 @@ env:
     availability:
       - BUILD
       - RUNTIME
+  - variable: SMTP_PORT
+    value: "587"
+    availability:
+      - RUNTIME
+  - variable: SMTP_SECURE
+    value: "false"
+    availability:
+      - RUNTIME
+  - variable: SMTP_HOST
+    secret: SMTP_HOST
+    availability:
+      - RUNTIME
+  - variable: SMTP_USER
+    secret: SMTP_USER
+    availability:
+      - RUNTIME
+  - variable: SMTP_PASS
+    secret: SMTP_PASS
+    availability:
+      - RUNTIME
+  - variable: BOOKING_CONFIRMATION_FROM
+    secret: BOOKING_CONFIRMATION_FROM
+    availability:
+      - RUNTIME
 
   # Grant access to secrets in Cloud Secret Manager.
   # You can create secrets with the CLI command `firebase apphosting:secrets:set <secretName>`.

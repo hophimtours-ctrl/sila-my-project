@@ -1,4 +1,5 @@
 import {
+  BedType,
   HotelDataSourceMode,
   HotelStatus,
   IntegrationLogLevel,
@@ -12,6 +13,7 @@ import { prisma } from "@/lib/db";
 export type NormalizedRoom = {
   externalRoomId: string;
   name: string;
+  bedType: BedType;
   pricePerNight: number;
   maxGuests: number;
   inventory: number;
@@ -79,6 +81,19 @@ function toSafeNumber(value: unknown, fallback: number) {
 }
 function uniqueStrings(values: string[]) {
   return Array.from(new Set(values.filter(Boolean)));
+}
+function normalizeBedType(value: unknown, roomName: string): BedType {
+  const text = `${toSafeString(value, "")} ${roomName}`.toLowerCase();
+  if (
+    text.includes("twin") ||
+    text.includes("separate") ||
+    text.includes("נפרד") ||
+    text.includes("שתי מיטות") ||
+    text.includes("2 מיטות")
+  ) {
+    return "TWIN";
+  }
+  return "DOUBLE";
 }
 
 function objectValues(input: unknown) {
@@ -412,6 +427,18 @@ function sanitizeAffiliateReferenceId(reference: string) {
 
 function normalizeRoom(rawRoom: unknown, index: number): NormalizedRoom {
   const room = typeof rawRoom === "object" && rawRoom !== null ? rawRoom : {};
+  const roomName = toSafeString(
+    (room as { name?: unknown; roomType?: unknown; title?: unknown }).name ??
+      (room as { roomType?: unknown }).roomType ??
+      (room as { title?: unknown }).title,
+    `Room ${index + 1}`,
+  );
+  const bedType = normalizeBedType(
+    (room as { bedType?: unknown; bed_type?: unknown; bedding?: unknown }).bedType ??
+      (room as { bed_type?: unknown }).bed_type ??
+      (room as { bedding?: unknown }).bedding,
+    roomName,
+  );
   const occupancyTotal = (
     room as {
       occupancy?: {
@@ -460,11 +487,10 @@ function normalizeRoom(rawRoom: unknown, index: number): NormalizedRoom {
       `room-${index + 1}`,
     ),
     name: toSafeString(
-      (room as { name?: unknown; roomType?: unknown; title?: unknown }).name ??
-        (room as { roomType?: unknown }).roomType ??
-        (room as { title?: unknown }).title,
+      roomName,
       `Room ${index + 1}`,
     ),
+    bedType,
     pricePerNight: Math.max(
       1,
       toSafeNumber(
@@ -1281,6 +1307,7 @@ export async function syncHotelProviderData(providerId: string, trigger: "manual
             where: { id: existingRoom.id },
             data: {
               name: room.name,
+              bedType: room.bedType,
               pricePerNight: room.pricePerNight,
               maxGuests: room.maxGuests,
               inventory: room.inventory,
@@ -1296,6 +1323,7 @@ export async function syncHotelProviderData(providerId: string, trigger: "manual
               hotelId,
               externalRoomId: room.externalRoomId,
               name: room.name,
+              bedType: room.bedType,
               pricePerNight: room.pricePerNight,
               maxGuests: room.maxGuests,
               inventory: room.inventory,

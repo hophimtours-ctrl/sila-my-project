@@ -14,6 +14,7 @@ import { prisma } from "@/lib/db";
 import { AdminManagementShell } from "@/components/admin-management-shell";
 import { AdminHotelCreateForm } from "@/components/admin-hotel-create-form";
 import { redirect } from "next/navigation";
+import { BED_TYPE_OPTIONS } from "@/lib/booking-options";
 import { ROOM_TYPE_OPTIONS } from "@/lib/room-type-options";
 const ownerAdminNavigationItems = [
   { href: "/admin/hotels", label: "ניהול מלונות" },
@@ -167,6 +168,13 @@ export default async function AdminHotelsPage({
                     placeholder="מקסימום אורחים"
                     className="rounded-lg border p-2 text-sm"
                   />
+                  <select name="bedType" defaultValue={BED_TYPE_OPTIONS[0]?.value} className="rounded-lg border p-2 text-sm">
+                    {BED_TYPE_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
                   <input
                     name="cancellationPolicy"
                     required
@@ -236,6 +244,13 @@ export default async function AdminHotelsPage({
                             defaultValue={roomType.maxGuests}
                             className="rounded-lg border p-2 text-sm"
                           />
+                          <select name="bedType" required defaultValue={roomType.bedType} className="rounded-lg border p-2 text-sm">
+                            {BED_TYPE_OPTIONS.map((option) => (
+                              <option key={option.value} value={option.value}>
+                                {option.label}
+                              </option>
+                            ))}
+                          </select>
                           <input
                             name="cancellationPolicy"
                             required

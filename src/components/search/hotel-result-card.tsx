@@ -27,7 +27,7 @@ type HotelResultCardProps = {
   hotelDetailsHref: string;
   showOnMapHref: string;
   isHebrew: boolean;
-  requestedNightsLabel: string | null;
+  requestedNights: number;
   lowInventoryLabel: string | null;
   favoriteControl: ReactNode;
   layout?: "gallery" | "horizontal";
@@ -38,12 +38,23 @@ export function HotelResultCard({
   hotelDetailsHref,
   showOnMapHref,
   isHebrew,
-  requestedNightsLabel,
+  requestedNights,
   lowInventoryLabel,
   favoriteControl,
   layout = "gallery",
 }: HotelResultCardProps) {
   const isHorizontalLayout = layout === "horizontal";
+  const requestedTotalPrice = requestedNights > 0 ? hotel.minPrice * requestedNights : null;
+  const requestedNightsText =
+    requestedNights > 0
+      ? isHebrew
+        ? requestedNights === 1
+          ? "לילה אחד"
+          : `${requestedNights} לילות`
+        : requestedNights === 1
+          ? "1 night"
+          : `${requestedNights} nights`
+      : null;
   return (
     <article
       className={
@@ -193,10 +204,13 @@ export function HotelResultCard({
                 {isHebrew ? "ביטול חינם" : "Free cancellation"}
               </span>
             )}
-            {requestedNightsLabel && (
-              <p className="mt-1 text-xs font-medium text-[var(--color-primary-light)]">
-                {isHebrew ? `מבוקש: ${requestedNightsLabel}` : `Requested: ${requestedNightsLabel}`}
-              </p>
+            {requestedNightsText && (
+              <div className="mt-1 space-y-0.5 text-xs font-medium text-[var(--color-primary-light)]">
+                <p>{requestedNightsText}</p>
+                {requestedTotalPrice !== null && (
+                  <p>{isHebrew ? `סה״כ ${formatCurrency(requestedTotalPrice)}` : `Total ${formatCurrency(requestedTotalPrice)}`}</p>
+                )}
+              </div>
             )}
             {hotel.hasLowAvailability && lowInventoryLabel && (
               <p className="mt-1 text-xs font-semibold text-rose-600">{lowInventoryLabel}</p>

@@ -4,6 +4,7 @@ import { requireUser } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { AdminManagementShell } from "@/components/admin-management-shell";
 import { redirect } from "next/navigation";
+import { BED_TYPE_OPTIONS } from "@/lib/booking-options";
 import { ROOM_TYPE_OPTIONS } from "@/lib/room-type-options";
 const ownerAdminNavigationItems = [
   { href: "/admin/hotels", label: "ניהול מלונות" },
@@ -82,6 +83,13 @@ export default async function AdminRoomsPage({
             placeholder="קיבולת"
             className="rounded-lg border p-2"
           />
+          <select name="bedType" defaultValue={BED_TYPE_OPTIONS[0]?.value} className="rounded-lg border p-2">
+            {BED_TYPE_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
           <input
             name="inventory"
             type="number"
@@ -145,6 +153,13 @@ export default async function AdminRoomsPage({
                 required
                 className="rounded-lg border p-2"
               />
+              <select name="bedType" defaultValue={room.bedType} className="rounded-lg border p-2">
+                {BED_TYPE_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
               <input
                 name="inventory"
                 defaultValue={room.inventory}

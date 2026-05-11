@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { BED_TYPE_OPTIONS } from "@/lib/booking-options";
 
 type OwnerRegisterPropertyFormProps = {
   error?: string;
@@ -104,6 +105,13 @@ export function OwnerRegisterPropertyForm({ error, action }: OwnerRegisterProper
         placeholder="שם החדר הראשי"
         className="rounded-lg border p-3"
       />
+      <select name="bedType" defaultValue={BED_TYPE_OPTIONS[0]?.value} className="rounded-lg border p-3">
+        {BED_TYPE_OPTIONS.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
       <textarea
         name="description"
         required

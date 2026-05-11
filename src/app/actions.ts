@@ -2,6 +2,7 @@
 
 import bcrypt from "bcryptjs";
 import {
+  BedType,
   BookingStatus,
   DashboardRole,
   HotelDataSourceMode,
@@ -9,6 +10,7 @@ import {
   Prisma,
   ProviderStatus,
   Role,
+  TripPurpose,
 } from "@prisma/client";
 import { addDays, differenceInCalendarDays } from "date-fns";
 import { revalidatePath } from "next/cache";
@@ -26,6 +28,7 @@ import {
   syncHotelProviderData,
   testHotelProviderConnection,
 } from "@/lib/hotel-api";
+import { sendBookingConfirmationEmail } from "@/lib/booking-confirmation-email";
 import {
   MOCK_FAVORITES_COOKIE_KEY,
   isMockHotelId,
@@ -50,6 +53,8 @@ const ENFORCED_OWNER_EMAILS = new Set(
     .map((email) => email.trim().toLowerCase())
     .filter(Boolean),
 );
+const BED_TYPE_VALUES: BedType[] = ["DOUBLE", "TWIN"];
+const TRIP_PURPOSE_VALUES: TripPurpose[] = ["BUSINESS", "WORK"];
 
 async function ensurePromotedAdminRole(params: { userId: string; email: string; role: Role }) {
   const normalizedEmail = params.email.trim().toLowerCase();
@@ -96,6 +101,17 @@ function parseBooleanValue(value: FormDataEntryValue | null, defaultValue = fals
   }
 
   return String(value) === "true";
+}
+function parseBedTypeValue(value: FormDataEntryValue | null, defaultValue: BedType = "DOUBLE"): BedType {
+  const candidate = String(value ?? "").trim().toUpperCase() as BedType;
+  return BED_TYPE_VALUES.includes(candidate) ? candidate : defaultValue;
+}
+function parseTripPurposeValue(
+  value: FormDataEntryValue | null,
+  defaultValue: TripPurpose = "BUSINESS",
+): TripPurpose {
+  const candidate = String(value ?? "").trim().toUpperCase() as TripPurpose;
+  return TRIP_PURPOSE_VALUES.includes(candidate) ? candidate : defaultValue;
 }
 function isRapidProviderConfig(name: string, endpoint: string, hotelsPath: string) {
   const normalizedName = name.toLowerCase();
@@ -666,6 +682,13 @@ export async function createBookingAction(formData: FormData) {
   const checkIn = new Date(String(formData.get("checkIn") ?? ""));
   const checkOut = new Date(String(formData.get("checkOut") ?? ""));
   const guests = Number(formData.get("guests") ?? 1);
+  const guestNames = formData
+    .getAll("guestNames")
+    .map((entry) => String(entry ?? "").trim())
+    .filter(Boolean);
+  const tripPurpose = parseTripPurposeValue(formData.get("tripPurpose"), "BUSINESS");
+  const specialRequestsValue = String(formData.get("specialRequests") ?? "").trim();
+  const specialRequests = specialRequestsValue || null;
 
   if (!roomTypeId || Number.isNaN(checkIn.getTime()) || Number.isNaN(checkOut.getTime())) {
     redirect(buildErrorRedirectPath("/", "פרטי הזמנה לא תקינים"));
@@ -691,6 +714,12 @@ export async function createBookingAction(formData: FormData) {
 
   if (guests > room.maxGuests) {
     redirect(buildErrorRedirectPath(`/hotels/${room.hotelId}`, "מספר אורחים גבוה מהמותר"));
+  }
+  if (guestNames.length === 0) {
+    redirect(buildErrorRedirectPath(`/hotels/${room.hotelId}`, "יש להזין לפחות שם אורח אחד"));
+  }
+  if (guestNames.length > guests) {
+    redirect(buildErrorRedirectPath(`/hotels/${room.hotelId}`, "מספר שמות האורחים חורג ממספר האורחים"));
   }
 
   const overlapping = await prisma.booking.count({
@@ -745,7 +774,7 @@ export async function createBookingAction(formData: FormData) {
     }
   }
 
-  await prisma.booking.create({
+  const booking = await prisma.booking.create({
     data: {
       userId: user.id,
       hotelId: room.hotelId,
@@ -753,9 +782,40 @@ export async function createBookingAction(formData: FormData) {
       checkIn,
       checkOut,
       guests,
+      guestNames,
+      tripPurpose,
+      specialRequests,
       totalPrice,
     },
   });
+  try {
+    await sendBookingConfirmationEmail({
+      recipientEmail: user.email,
+      guestName: user.name,
+      bookingId: booking.id,
+      bookingCreatedAt: booking.createdAt,
+      bookingStatus: booking.status,
+      hotelName: room.hotel.name,
+      hotelAddress: room.hotel.location,
+      hotelCity: room.hotel.city,
+      hotelCountry: room.hotel.country,
+      hotelContactEmail: room.hotel.contactEmail,
+      roomName: room.name,
+      cancellationPolicy: room.cancellationPolicy,
+      checkIn,
+      checkOut,
+      guests,
+      nights,
+      totalPrice,
+      rapidBookingReference,
+    });
+  } catch (error) {
+    console.error("[createBookingAction] Failed to send booking confirmation email", {
+      bookingId: booking.id,
+      userId: user.id,
+      error,
+    });
+  }
 
   revalidatePath("/bookings");
   const successMessage = rapidBookingReference
@@ -938,6 +998,7 @@ export async function ownerRegisterAccommodationAction(formData: FormData) {
   const pricePerNight = Number(formData.get("pricePerNight") ?? 0);
   const maxGuests = Math.max(1, Number(formData.get("maxGuests") ?? 2));
   const inventory = Math.max(1, Number(formData.get("inventory") ?? 1));
+  const bedType = parseBedTypeValue(formData.get("bedType"), "DOUBLE");
   const cancellationPolicy =
     String(formData.get("cancellationPolicy") ?? "").trim() || "ביטול חינם עד 48 שעות לפני ההגעה";
 
@@ -980,6 +1041,7 @@ export async function ownerRegisterAccommodationAction(formData: FormData) {
       maxGuests,
       inventory,
       availableInventory: inventory,
+      bedType,
       isAvailable: true,
       photos: images,
       cancellationPolicy,
@@ -996,6 +1058,7 @@ export async function ownerCreateRoomAction(formData: FormData) {
   const name = String(formData.get("name") ?? "").trim();
   const pricePerNight = Number(formData.get("pricePerNight") ?? 0);
   const maxGuests = Number(formData.get("maxGuests") ?? 1);
+  const bedType = parseBedTypeValue(formData.get("bedType"), "DOUBLE");
   const { inventory, availableInventory, isAvailable } = parseRoomInventoryState(formData);
   const photos = parseListValue(String(formData.get("photos") ?? ""));
   const cancellationPolicy = String(formData.get("cancellationPolicy") ?? "").trim();
@@ -1030,6 +1093,7 @@ export async function ownerCreateRoomAction(formData: FormData) {
       name,
       pricePerNight,
       maxGuests,
+      bedType,
       inventory,
       availableInventory,
       isAvailable,
@@ -1401,6 +1465,7 @@ export async function adminCreateRoomAction(formData: FormData) {
   const name = String(formData.get("name") ?? "").trim();
   const pricePerNight = Number(formData.get("pricePerNight") ?? 0);
   const maxGuests = Number(formData.get("maxGuests") ?? 1);
+  const bedType = parseBedTypeValue(formData.get("bedType"), "DOUBLE");
   const { inventory, availableInventory, isAvailable } = parseRoomInventoryState(formData);
   const cancellationPolicy = String(formData.get("cancellationPolicy") ?? "").trim();
   const photos = parseListValue(String(formData.get("photos") ?? ""));
@@ -1428,6 +1493,7 @@ export async function adminCreateRoomAction(formData: FormData) {
       name,
       pricePerNight,
       maxGuests,
+      bedType,
       inventory,
       availableInventory,
       isAvailable,
@@ -1457,6 +1523,7 @@ export async function adminUpdateRoomAction(formData: FormData) {
   const name = String(formData.get("name") ?? "").trim();
   const pricePerNight = Number(formData.get("pricePerNight") ?? 0);
   const maxGuests = Number(formData.get("maxGuests") ?? 1);
+  const bedType = parseBedTypeValue(formData.get("bedType"), "DOUBLE");
   const { inventory, availableInventory, isAvailable } = parseRoomInventoryState(formData);
   const cancellationPolicy = String(formData.get("cancellationPolicy") ?? "").trim();
   const photos = parseListValue(String(formData.get("photos") ?? ""));
@@ -1486,6 +1553,7 @@ export async function adminUpdateRoomAction(formData: FormData) {
       name,
       pricePerNight,
       maxGuests,
+      bedType,
       inventory,
       availableInventory,
       isAvailable,
