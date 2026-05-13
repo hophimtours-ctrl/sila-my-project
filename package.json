@@ -12,6 +12,7 @@
     "test": "tsx --test src/**/*.test.ts",
     "lint": "eslint .",
     "rapid:setup-provider": "tsx scripts/setup-rapid-provider.ts",
+    "hotelbeds:setup-provider": "tsx scripts/setup-hotelbeds-provider.ts",
     "prisma:generate": "prisma generate",
     "db:push": "prisma db push",
     "db:seed": "prisma db seed",

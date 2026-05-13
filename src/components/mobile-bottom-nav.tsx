@@ -38,7 +38,7 @@ export function MobileBottomNav({ language, isAuthenticated }: MobileBottomNavPr
       ),
     },
     {
-      href: "/search/results?category=accommodations",
+      href: "/search?category=accommodations",
       label: isHebrew ? "חיפוש" : "Search",
       match: (value) => value.startsWith("/search"),
       icon: (

@@ -5,7 +5,7 @@ import { differenceInCalendarDays } from "date-fns";
 import { addFavoriteAction, removeFavoriteAction } from "@/app/actions";
 import { getCurrentUser } from "@/lib/auth";
 import { getBedTypeLabel } from "@/lib/booking-options";
-import { CalendarOutlineIcon, GuestsOutlineIcon } from "@/components/search/search-icons";
+import { RoomBookingForm } from "@/components/room-booking-form";
 import { prisma } from "@/lib/db";
 import { formatCurrency } from "@/lib/format";
 import { fetchMockHotelById } from "@/lib/mock-hotels-api";
@@ -266,7 +266,14 @@ function getFacilityIcon(facility: string) {
     </svg>
   );
 }
-function renderMockHotelPage(hotel: MockHotel, query: { checkIn?: string; checkOut?: string; guests?: string }) {
+function renderMockHotelPage(hotel: MockHotel, query: {
+  checkIn?: string;
+  checkOut?: string;
+  guests?: string;
+  adults?: string;
+  children?: string;
+  rooms?: string;
+}) {
   const requestedCheckInDate = parseDate(query.checkIn);
   const requestedCheckOutDate = parseDate(query.checkOut);
   const requestedNights =
@@ -291,6 +298,15 @@ function renderMockHotelPage(hotel: MockHotel, query: { checkIn?: string; checkO
   }
   if (query.guests) {
     hotelQuery.set("guests", query.guests);
+  }
+  if (query.adults) {
+    hotelQuery.set("adults", query.adults);
+  }
+  if (query.children) {
+    hotelQuery.set("children", query.children);
+  }
+  if (query.rooms) {
+    hotelQuery.set("rooms", query.rooms);
   }
   const buildGalleryLink = (imageIndex: number) => {
     const galleryQuery = new URLSearchParams(hotelQuery);
@@ -453,11 +469,11 @@ function renderMockHotelPage(hotel: MockHotel, query: { checkIn?: string; checkO
             <p className="text-sm">עד {room.maxGuests} אורחים</p>
             <p className="text-sm text-slate-600">סוג מיטה: {room.bedType}</p>
             <p className="my-2 font-bold text-[var(--color-primary)]">
-              {formatCurrency(room.pricePerNight)} ללילה
+              {formatCurrency(room.pricePerNight, room.currency)} ללילה
             </p>
             {requestedNights > 0 && (
               <p className="text-sm font-semibold text-slate-700">
-                סה״כ {formatCurrency(room.pricePerNight * requestedNights)}
+                סה״כ {formatCurrency(room.pricePerNight * requestedNights, room.currency)}
               </p>
             )}
             <p className="text-sm text-slate-600">הזמנות פעילות רק לאחר חיבור לנתוני מלונות אמיתיים.</p>
@@ -473,7 +489,15 @@ export default async function HotelPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ error?: string; checkIn?: string; checkOut?: string; guests?: string }>;
+  searchParams: Promise<{
+    error?: string;
+    checkIn?: string;
+    checkOut?: string;
+    guests?: string;
+    adults?: string;
+    children?: string;
+    rooms?: string;
+  }>;
 }) {
   const { id } = await params;
   const query = await searchParams;
@@ -545,6 +569,15 @@ export default async function HotelPage({
   }
   if (query.guests) {
     hotelQuery.set("guests", query.guests);
+  }
+  if (query.adults) {
+    hotelQuery.set("adults", query.adults);
+  }
+  if (query.children) {
+    hotelQuery.set("children", query.children);
+  }
+  if (query.rooms) {
+    hotelQuery.set("rooms", query.rooms);
   }
   const buildGalleryLink = (imageIndex: number) => {
     const galleryQuery = new URLSearchParams(hotelQuery);
@@ -853,64 +886,24 @@ export default async function HotelPage({
             </div>
             <p className="text-xs text-slate-500">חדרים זמינים כרגע: {remainingRooms}</p>
             <p className="my-2 font-bold text-[var(--color-primary)]">
-              {formatCurrency(room.pricePerNight)} ללילה
+              {formatCurrency(room.pricePerNight, room.currencyCode)} ללילה
             </p>
             {requestedNights > 0 && (
               <p className="text-sm font-semibold text-slate-700">
-                סה״כ {formatCurrency(room.pricePerNight * requestedNights)}
+                סה״כ {formatCurrency(room.pricePerNight * requestedNights, room.currencyCode)}
               </p>
             )}
             {user?.role === "GUEST" && isBookable ? (
-              <form
-                action="/bookings/payment"
-                method="get"
-                className="grid gap-2 md:grid-cols-[1fr_1fr_1fr_auto] md:items-stretch"
-              >
-                <input type="hidden" name="roomTypeId" value={room.id} />
-                <div className="flex min-h-12 items-center gap-2 rounded-xl border border-slate-300 bg-white px-3">
-                  <CalendarOutlineIcon className="h-4 w-4 shrink-0 text-slate-500" />
-                  <div className="flex-1 text-right">
-                    <p className="text-[11px] text-slate-500">צ׳ק-אין</p>
-                    <input
-                      name="checkIn"
-                      type="date"
-                      required
-                      defaultValue={query.checkIn}
-                      className="w-full border-none bg-transparent p-0 text-sm text-slate-900 outline-none"
-                    />
-                  </div>
-                </div>
-                <div className="flex min-h-12 items-center gap-2 rounded-xl border border-slate-300 bg-white px-3">
-                  <CalendarOutlineIcon className="h-4 w-4 shrink-0 text-slate-500" />
-                  <div className="flex-1 text-right">
-                    <p className="text-[11px] text-slate-500">צ׳ק-אאוט</p>
-                    <input
-                      name="checkOut"
-                      type="date"
-                      required
-                      defaultValue={query.checkOut}
-                      className="w-full border-none bg-transparent p-0 text-sm text-slate-900 outline-none"
-                    />
-                  </div>
-                </div>
-                <div className="flex min-h-12 items-center gap-2 rounded-xl border border-slate-300 bg-white px-3">
-                  <GuestsOutlineIcon className="h-4 w-4 shrink-0 text-slate-500" />
-                  <div className="flex-1 text-right">
-                    <p className="text-[11px] text-slate-500">אורחים</p>
-                    <input
-                      name="guests"
-                      type="number"
-                      min={1}
-                      max={room.maxGuests}
-                      defaultValue={query.guests ? Number(query.guests) : 1}
-                      className="w-full border-none bg-transparent p-0 text-sm text-slate-900 outline-none"
-                    />
-                  </div>
-                </div>
-                <button className="min-h-12 rounded-xl bg-[var(--color-primary-light)] px-5 text-sm font-semibold text-white transition hover:brightness-110">
-                  הזמן עכשיו
-                </button>
-              </form>
+              <RoomBookingForm
+                roomTypeId={room.id}
+                maxGuests={room.maxGuests}
+                defaultCheckIn={query.checkIn}
+                defaultCheckOut={query.checkOut}
+                defaultGuests={query.guests}
+                defaultAdults={query.adults}
+                defaultChildren={query.children}
+                defaultRooms={query.rooms}
+              />
             ) : user?.role === "GUEST" ? (
               <p className="text-sm font-medium text-red-600">אין זמינות לחדר זה בתאריכים שנבחרו.</p>
             ) : (

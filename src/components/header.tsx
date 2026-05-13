@@ -164,7 +164,7 @@ export async function Header() {
         <nav className="hidden items-center gap-5 text-sm font-medium text-slate-700 md:flex">
           <Link
             className="inline-flex items-center gap-1 transition hover:text-[var(--color-primary-light)]"
-            href="/search/results?category=accommodations"
+            href="/search?category=accommodations"
           >
             <svg viewBox="0 0 24 24" aria-hidden className="h-4 w-4">
               <path

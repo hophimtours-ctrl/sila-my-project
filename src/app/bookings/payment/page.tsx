@@ -4,7 +4,7 @@ import { differenceInCalendarDays, format } from "date-fns";
 import { redirect } from "next/navigation";
 import { createBookingAction } from "@/app/actions";
 import { requireUser } from "@/lib/auth";
-import { getBedTypeLabel, TRIP_PURPOSE_OPTIONS } from "@/lib/booking-options";
+import { getBedTypeLabel, getRoomPaymentPolicyLabel, TRIP_PURPOSE_OPTIONS } from "@/lib/booking-options";
 import { prisma } from "@/lib/db";
 import { formatCurrency, formatDate } from "@/lib/format";
 
@@ -13,6 +13,9 @@ type PaymentPageSearchParams = {
   checkIn?: string;
   checkOut?: string;
   guests?: string;
+  adults?: string;
+  children?: string;
+  rooms?: string;
   error?: string;
 };
 
@@ -28,6 +31,13 @@ function parseDateInput(value?: string) {
 function parsePositiveInteger(value?: string) {
   const parsed = Number(value);
   if (!Number.isInteger(parsed) || parsed < 1) {
+    return undefined;
+  }
+  return parsed;
+}
+function parseNonNegativeInteger(value?: string) {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 0) {
     return undefined;
   }
   return parsed;
@@ -63,6 +73,15 @@ export default async function BookingPaymentPage({
   const checkInDate = parseDateInput(params.checkIn);
   const checkOutDate = parseDateInput(params.checkOut);
   const guests = parsePositiveInteger(params.guests);
+  const adults = parsePositiveInteger(params.adults);
+  const children = parseNonNegativeInteger(params.children);
+  const rooms = parsePositiveInteger(params.rooms);
+  const hasGuestBreakdown = adults !== undefined || children !== undefined;
+  const selectedAdults = adults ?? guests ?? 1;
+  const selectedChildren = children ?? 0;
+  const selectedRooms = rooms ?? 1;
+  const derivedGuests = selectedAdults + selectedChildren;
+  const selectedGuests = hasGuestBreakdown ? derivedGuests : (guests ?? derivedGuests);
 
   const hotelQuery = new URLSearchParams();
   if (params.checkIn) {
@@ -74,17 +93,25 @@ export default async function BookingPaymentPage({
   if (params.guests) {
     hotelQuery.set("guests", params.guests);
   }
+  if (params.adults) {
+    hotelQuery.set("adults", params.adults);
+  }
+  if (params.children) {
+    hotelQuery.set("children", params.children);
+  }
+  if (params.rooms) {
+    hotelQuery.set("rooms", params.rooms);
+  }
   const hotelDetailsHref =
     hotelQuery.size > 0 ? `/hotels/${room.hotelId}?${hotelQuery.toString()}` : `/hotels/${room.hotelId}`;
   const redirectToHotelWithError = (message: string): never =>
     redirect(appendErrorQuery(hotelDetailsHref, message));
 
-  if (!checkInDate || !checkOutDate || guests === undefined) {
+  if (!checkInDate || !checkOutDate || selectedGuests < 1) {
     redirectToHotelWithError("יש למלא תאריכים ומספר אורחים תקין");
   }
   const selectedCheckInDate = checkInDate!;
   const selectedCheckOutDate = checkOutDate!;
-  const selectedGuests = guests!;
 
   if (selectedCheckOutDate <= selectedCheckInDate) {
     redirectToHotelWithError("טווח תאריכים לא תקין");
@@ -136,6 +163,9 @@ export default async function BookingPaymentPage({
     checkIn: checkInValue,
     checkOut: checkOutValue,
     guests: String(selectedGuests),
+    adults: String(selectedAdults),
+    children: String(selectedChildren),
+    rooms: String(selectedRooms),
   }).toString()}`;
 
   return (
@@ -175,16 +205,36 @@ export default async function BookingPaymentPage({
             <dd className="font-semibold">{selectedGuests}</dd>
           </div>
           <div>
+            <dt className="text-slate-500">מבוגרים</dt>
+            <dd className="font-semibold">{selectedAdults}</dd>
+          </div>
+          <div>
+            <dt className="text-slate-500">ילדים</dt>
+            <dd className="font-semibold">{selectedChildren}</dd>
+          </div>
+          <div>
+            <dt className="text-slate-500">חדרים</dt>
+            <dd className="font-semibold">{selectedRooms}</dd>
+          </div>
+          <div>
             <dt className="text-slate-500">לילות</dt>
             <dd className="font-semibold">{nights}</dd>
           </div>
           <div>
             <dt className="text-slate-500">מחיר ללילה</dt>
-            <dd className="font-semibold">{formatCurrency(room.pricePerNight)}</dd>
+            <dd className="font-semibold">{formatCurrency(room.pricePerNight, room.currencyCode)}</dd>
           </div>
           <div>
             <dt className="text-slate-500">סה״כ לתשלום</dt>
-            <dd className="font-semibold text-[var(--color-primary)]">{formatCurrency(totalPrice)}</dd>
+            <dd className="font-semibold text-[var(--color-primary)]">{formatCurrency(totalPrice, room.currencyCode)}</dd>
+          </div>
+          <div>
+            <dt className="text-slate-500">מטבע</dt>
+            <dd className="font-semibold">{room.currencyCode}</dd>
+          </div>
+          <div>
+            <dt className="text-slate-500">אופן סליקה</dt>
+            <dd className="font-semibold">{getRoomPaymentPolicyLabel(room.paymentPolicy)}</dd>
           </div>
           <div>
             <dt className="text-slate-500">מדיניות ביטול</dt>
@@ -220,6 +270,9 @@ export default async function BookingPaymentPage({
           <input type="hidden" name="checkIn" value={checkInValue} />
           <input type="hidden" name="checkOut" value={checkOutValue} />
           <input type="hidden" name="guests" value={String(selectedGuests)} />
+          <input type="hidden" name="adults" value={String(selectedAdults)} />
+          <input type="hidden" name="children" value={String(selectedChildren)} />
+          <input type="hidden" name="rooms" value={String(selectedRooms)} />
           <input type="hidden" name="bookingReturnPath" value={bookingReturnPath} />
 
           <div className="space-y-3 rounded-lg border border-slate-200 p-3">
@@ -258,53 +311,31 @@ export default async function BookingPaymentPage({
             </div>
           </div>
 
-          <div className="grid gap-3 md:grid-cols-2">
-            <label className="space-y-1 text-sm">
-              <span className="font-medium">שם בעל הכרטיס</span>
-              <input
-                name="cardHolder"
-                required
-                className="w-full rounded-lg border border-slate-300 p-2"
-                placeholder="ישראל ישראלי"
-              />
-            </label>
-            <label className="space-y-1 text-sm">
-              <span className="font-medium">מספר כרטיס</span>
-              <input
-                name="cardNumber"
-                required
-                inputMode="numeric"
-                pattern="[0-9]{12,19}"
-                maxLength={19}
-                className="w-full rounded-lg border border-slate-300 p-2"
-                placeholder="4580123412341234"
-              />
-            </label>
-            <label className="space-y-1 text-sm">
-              <span className="font-medium">תוקף (MM/YY)</span>
-              <input
-                name="cardExpiry"
-                required
-                pattern="(0[1-9]|1[0-2])/[0-9]{2}"
-                className="w-full rounded-lg border border-slate-300 p-2"
-                placeholder="08/28"
-              />
-            </label>
-            <label className="space-y-1 text-sm">
-              <span className="font-medium">CVV</span>
-              <input
-                name="cardCvv"
-                required
-                inputMode="numeric"
-                pattern="[0-9]{3,4}"
-                maxLength={4}
-                className="w-full rounded-lg border border-slate-300 p-2"
-                placeholder="123"
-              />
-            </label>
+          <div className="space-y-3 rounded-lg border border-slate-200 p-3">
+            <h3 className="text-sm font-semibold text-slate-900">אישור תשלום מאובטח (Tokenized)</h3>
+            <p className="text-xs text-slate-600">
+              אין להזין פרטי כרטיס גולמיים. יש להזין רק מזהה טוקן/סשן שמתקבל מטופס התשלום המאובטח של הסולק.
+            </p>
+            <div className="grid gap-3 md:grid-cols-2">
+              <label className="space-y-1 text-sm">
+                <span className="font-medium">Payment Token</span>
+                <input
+                  name="paymentToken"
+                  required
+                  className="w-full rounded-lg border border-slate-300 p-2"
+                  placeholder="tok_xxx / pm_xxx / token_xxx"
+                />
+              </label>
+              <label className="space-y-1 text-sm">
+                <span className="font-medium">Payment Session ID (אופציונלי)</span>
+                <input
+                  name="paymentSessionId"
+                  className="w-full rounded-lg border border-slate-300 p-2"
+                  placeholder="sess_xxx / checkout_xxx"
+                />
+              </label>
+            </div>
           </div>
-
-          <p className="text-xs text-slate-500">פרטי התשלום משמשים לאישור ההזמנה בלבד.</p>
 
           <div className="flex flex-wrap gap-2">
             <button className="rounded-lg bg-[var(--color-cta)] px-4 py-2 font-bold text-slate-900">

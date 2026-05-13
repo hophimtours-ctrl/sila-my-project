@@ -118,7 +118,7 @@ export function mapRapidHotelsToUnified(params: {
     }
 
     items.push({
-      id: `rapid:${params.providerId}:${hotel.externalHotelId}`,
+      id: `${providerCode}:${params.providerId}:${hotel.externalHotelId}`,
       name: hotel.name,
       location: hotel.location,
       city: location.city,

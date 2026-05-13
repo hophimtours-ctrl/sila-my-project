@@ -1,12 +1,14 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { BED_TYPE_OPTIONS } from "@/lib/booking-options";
+import { BED_TYPE_OPTIONS, ROOM_CURRENCY_OPTIONS, ROOM_PAYMENT_POLICY_OPTIONS } from "@/lib/booking-options";
 
 type OwnerRegisterPropertyFormProps = {
   error?: string;
   action: (formData: FormData) => void | Promise<void>;
 };
+const HOTEL_MARKUP_MODES = ["PERCENTAGE", "AMOUNT", "MAX"] as const;
+const SUPPLIER_TYPES = ["HOTELBEDS", "MANUAL", "DIRECT"] as const;
 
 export function OwnerRegisterPropertyForm({ error, action }: OwnerRegisterPropertyFormProps) {
   const [address, setAddress] = useState("");
@@ -78,7 +80,39 @@ export function OwnerRegisterPropertyForm({ error, action }: OwnerRegisterProper
         type="number"
         min={1}
         required
-        placeholder="מחיר ללילה"
+        placeholder="מחיר נטו ללילה (ללא מרקאפ)"
+        className="rounded-lg border p-3"
+      />
+      <select name="supplierType" defaultValue="MANUAL" className="rounded-lg border p-3">
+        {SUPPLIER_TYPES.map((type) => (
+          <option key={type} value={type}>
+            {type}
+          </option>
+        ))}
+      </select>
+      <select name="markupMode" defaultValue="PERCENTAGE" className="rounded-lg border p-3">
+        {HOTEL_MARKUP_MODES.map((mode) => (
+          <option key={mode} value={mode}>
+            {mode}
+          </option>
+        ))}
+      </select>
+      <input
+        name="markupPercentage"
+        type="number"
+        min={0}
+        step="0.01"
+        defaultValue={0}
+        placeholder="אחוז מרקאפ"
+        className="rounded-lg border p-3"
+      />
+      <input
+        name="markupAmount"
+        type="number"
+        min={0}
+        step="0.01"
+        defaultValue={0}
+        placeholder="מרקאפ קבוע"
         className="rounded-lg border p-3"
       />
       <input
@@ -107,6 +141,20 @@ export function OwnerRegisterPropertyForm({ error, action }: OwnerRegisterProper
       />
       <select name="bedType" defaultValue={BED_TYPE_OPTIONS[0]?.value} className="rounded-lg border p-3">
         {BED_TYPE_OPTIONS.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+      <select name="paymentPolicy" defaultValue={ROOM_PAYMENT_POLICY_OPTIONS[0]?.value} className="rounded-lg border p-3">
+        {ROOM_PAYMENT_POLICY_OPTIONS.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+      <select name="currencyCode" defaultValue={ROOM_CURRENCY_OPTIONS[0]?.value} className="rounded-lg border p-3">
+        {ROOM_CURRENCY_OPTIONS.map((option) => (
           <option key={option.value} value={option.value}>
             {option.label}
           </option>

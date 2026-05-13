@@ -4,7 +4,7 @@ import { requireUser } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { AdminManagementShell } from "@/components/admin-management-shell";
 import { redirect } from "next/navigation";
-import { BED_TYPE_OPTIONS } from "@/lib/booking-options";
+import { BED_TYPE_OPTIONS, ROOM_CURRENCY_OPTIONS, ROOM_PAYMENT_POLICY_OPTIONS } from "@/lib/booking-options";
 import { ROOM_TYPE_OPTIONS } from "@/lib/room-type-options";
 const ownerAdminNavigationItems = [
   { href: "/admin/hotels", label: "ניהול מלונות" },
@@ -72,7 +72,7 @@ export default async function AdminRoomsPage({
             type="number"
             min={1}
             required
-            placeholder="מחיר בסיס"
+            placeholder="מחיר נטו"
             className="rounded-lg border p-2"
           />
           <input
@@ -108,6 +108,24 @@ export default async function AdminRoomsPage({
             placeholder="חדרים זמינים"
             className="rounded-lg border p-2"
           />
+          <select
+            name="paymentPolicy"
+            defaultValue={ROOM_PAYMENT_POLICY_OPTIONS[0]?.value}
+            className="rounded-lg border p-2"
+          >
+            {ROOM_PAYMENT_POLICY_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+          <select name="currencyCode" defaultValue={ROOM_CURRENCY_OPTIONS[0]?.value} className="rounded-lg border p-2">
+            {ROOM_CURRENCY_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
           <input
             name="cancellationPolicy"
             required
@@ -143,6 +161,7 @@ export default async function AdminRoomsPage({
                 type="number"
                 min={1}
                 required
+                placeholder="מחיר נטו"
                 className="rounded-lg border p-2"
               />
               <input
@@ -176,6 +195,20 @@ export default async function AdminRoomsPage({
                 required
                 className="rounded-lg border p-2"
               />
+              <select name="paymentPolicy" defaultValue={room.paymentPolicy} className="rounded-lg border p-2">
+                {ROOM_PAYMENT_POLICY_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+              <select name="currencyCode" defaultValue={room.currencyCode} className="rounded-lg border p-2">
+                {ROOM_CURRENCY_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
               <input
                 name="cancellationPolicy"
                 defaultValue={room.cancellationPolicy}

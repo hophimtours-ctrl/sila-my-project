@@ -1,11 +1,13 @@
 import {
   BedType,
   HotelDataSourceMode,
+  HotelMarkupMode,
   HotelStatus,
   IntegrationLogLevel,
   Prisma,
   ProviderStatus,
   Role,
+  SupplierType,
 } from "@prisma/client";
 import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from "node:crypto";
 import { prisma } from "@/lib/db";
@@ -74,6 +76,32 @@ function toSafeString(value: unknown, fallback: string) {
 
   return fallback;
 }
+function toTextValue(value: unknown, fallback = "") {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed || fallback;
+  }
+  if (!value || typeof value !== "object") {
+    return fallback;
+  }
+
+  const record = value as Record<string, unknown>;
+  const preferredKeys = ["content", "name", "description", "text", "value", "label"];
+  for (const key of preferredKeys) {
+    const candidate = record[key];
+    if (typeof candidate === "string" && candidate.trim()) {
+      return candidate.trim();
+    }
+  }
+
+  for (const entry of Object.values(record)) {
+    if (typeof entry === "string" && entry.trim()) {
+      return entry.trim();
+    }
+  }
+
+  return fallback;
+}
 
 function toSafeNumber(value: unknown, fallback: number) {
   const asNumber = Number(value);
@@ -118,7 +146,7 @@ function toNamedValueArray(input: unknown) {
         }
 
         if (value && typeof value === "object") {
-          return toSafeString((value as { name?: unknown }).name, "");
+          return toTextValue((value as { name?: unknown }).name ?? value, "");
         }
 
         return "";
@@ -213,6 +241,19 @@ function resolveRapidApiGatewayHost(endpoint: string) {
   }
 }
 
+function isHotelbedsProvider(provider: { name: string; endpoint: string; hotelsPath: string }) {
+  const endpoint = provider.endpoint.toLowerCase();
+  const path = provider.hotelsPath.toLowerCase();
+  const name = provider.name.toLowerCase();
+
+  return (
+    endpoint.includes("hotelbeds") ||
+    endpoint.includes("hb-api") ||
+    name.includes("hotelbeds") ||
+    path.includes("/hotel-content-api/") ||
+    path.includes("/hotel-api/")
+  );
+}
 function buildRapidAuthorizationHeader(apiKey: string, sharedSecret: string) {
   const timestamp = Math.floor(Date.now() / 1000).toString();
   const signature = createHash("sha512")
@@ -220,6 +261,17 @@ function buildRapidAuthorizationHeader(apiKey: string, sharedSecret: string) {
     .digest("hex");
 
   return `EAN APIKey=${apiKey},Signature=${signature},timestamp=${timestamp}`;
+}
+function buildHotelbedsSignature(apiKey: string, sharedSecret: string) {
+  const timestamp = Math.floor(Date.now() / 1000).toString();
+  const signature = createHash("sha256")
+    .update(`${apiKey}${sharedSecret}${timestamp}`)
+    .digest("hex");
+
+  return {
+    timestamp,
+    signature,
+  };
 }
 
 function addUtcDays(baseDate: Date, days: number) {
@@ -543,6 +595,13 @@ function resolveHotelsArray(payload: unknown) {
   if (Array.isArray(record.hotels)) {
     return record.hotels;
   }
+  if (
+    record.hotels &&
+    typeof record.hotels === "object" &&
+    Array.isArray((record.hotels as { hotels?: unknown }).hotels)
+  ) {
+    return (record.hotels as { hotels: unknown[] }).hotels;
+  }
   if (Array.isArray(record.data)) {
     return record.data;
   }
@@ -574,6 +633,8 @@ function normalizeHotel(rawHotel: unknown, index: number): NormalizedHotel {
   const city = toSafeString(address.city, "");
   const countryCode = toSafeString(address.country_code, "");
   const locationFromAddress = [city, countryCode].filter(Boolean).join(", ");
+  const cityText = toTextValue((hotel as { city?: unknown }).city, "");
+  const destinationText = toTextValue((hotel as { destination?: unknown }).destination, "");
   const ratings = (
     hotel as {
       ratings?: {
@@ -604,21 +665,27 @@ function normalizeHotel(rawHotel: unknown, index: number): NormalizedHotel {
       `hotel-${index + 1}`,
     ),
     name: toSafeString(
-      (hotel as { name?: unknown; title?: unknown; hotelName?: unknown }).name ??
-        (hotel as { hotelName?: unknown }).hotelName ??
-        (hotel as { title?: unknown }).title,
+      toTextValue(
+        (hotel as { name?: unknown; title?: unknown; hotelName?: unknown }).name ??
+          (hotel as { hotelName?: unknown }).hotelName ??
+          (hotel as { title?: unknown }).title,
+        "",
+      ),
       `Imported Hotel ${index + 1}`,
     ),
     location: toSafeString(
-      (hotel as { location?: unknown; city?: unknown; destination?: unknown }).location ??
-        (hotel as { city?: unknown }).city ??
-        (hotel as { destination?: unknown }).destination ??
+      toTextValue((hotel as { location?: unknown }).location, "") ||
+        cityText ||
+        destinationText ||
         locationFromAddress,
       "Unknown location",
     ),
     description: toSafeString(
-      (hotel as { description?: unknown; summary?: unknown }).description ??
-        (hotel as { summary?: unknown }).summary,
+      toTextValue(
+        (hotel as { description?: unknown; summary?: unknown }).description ??
+          (hotel as { summary?: unknown }).summary,
+        "",
+      ),
       "No description provided by API.",
     ),
     facilities: toNamedValueArray(
@@ -1038,6 +1105,16 @@ async function fetchProviderHotelPayload(providerId: string) {
       sessionId: randomUUID(),
       requireCustomerIp: false,
     });
+  } else if (isHotelbedsProvider(provider)) {
+    if (!provider.apiSecretEncrypted) {
+      throw new Error("Hotelbeds provider requires an API secret");
+    }
+    const sharedSecret = decryptApiKey(provider.apiSecretEncrypted);
+    const { signature } = buildHotelbedsSignature(apiKey, sharedSecret);
+    requestHeaders["Api-key"] = apiKey;
+    requestHeaders["X-Signature"] = signature;
+    requestHeaders["Accept-Encoding"] = "gzip";
+    requestHeaders["User-Agent"] = process.env.HOTELBEDS_USER_AGENT?.trim() || "BookMeNow/1.0";
   } else {
     requestHeaders.Authorization = `Bearer ${apiKey}`;
     requestHeaders["x-api-key"] = apiKey;
@@ -1229,6 +1306,9 @@ export async function syncHotelProviderData(providerId: string, trigger: "manual
       );
     }
     const ownerId = await resolveDefaultOwnerId();
+    const inferredSupplierType = isHotelbedsProvider(provider)
+      ? SupplierType.HOTELBEDS
+      : SupplierType.DIRECT;
     let importedCount = 0;
 
     for (const normalizedHotel of normalizedHotels) {
@@ -1259,6 +1339,10 @@ export async function syncHotelProviderData(providerId: string, trigger: "manual
                 }),
             rating: normalizedHotel.rating,
             status: HotelStatus.APPROVED,
+            supplierType:
+              existingHotel.supplierType === SupplierType.MANUAL
+                ? inferredSupplierType
+                : existingHotel.supplierType,
             providerId: provider.id,
             externalHotelId: normalizedHotel.externalHotelId,
             dataSourceMode: shouldPreserveManual
@@ -1282,6 +1366,10 @@ export async function syncHotelProviderData(providerId: string, trigger: "manual
             images: normalizedHotel.images,
             rating: normalizedHotel.rating,
             dataSourceMode: HotelDataSourceMode.API,
+            supplierType: inferredSupplierType,
+            markupMode: HotelMarkupMode.PERCENTAGE,
+            markupPercentage: 0,
+            markupAmount: 0,
             status: HotelStatus.APPROVED,
             lastImportedAt: new Date(),
           },

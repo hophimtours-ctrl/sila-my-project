@@ -74,3 +74,93 @@ export type UnifiedHotelAvailabilityResult = {
   guests: number;
   rooms: UnifiedRoomAvailability[];
 };
+
+export type UnifiedPaymentOperation =
+  | "initialize"
+  | "capture"
+  | "void"
+  | "refund";
+
+export type UnifiedPaymentStatus =
+  | "PENDING"
+  | "AUTHORIZED"
+  | "CAPTURED"
+  | "VOIDED"
+  | "REFUNDED"
+  | "FAILED";
+
+export type UnifiedPaymentGateway = "ISRAEL" | "STRIPE";
+
+export type UnifiedPaymentOperationRequest = {
+  operation: UnifiedPaymentOperation;
+  bookingId: string;
+  paymentToken?: string;
+  paymentSessionId?: string;
+  amount?: number;
+  idempotencyKey?: string;
+  metadata?: Record<string, unknown>;
+};
+
+export type UnifiedBookingPaymentOperation = {
+  id: string;
+  operationType: string;
+  operationStatus: string;
+  gateway: UnifiedPaymentGateway;
+  amount: number;
+  currencyCode: string;
+  gatewayReference: string | null;
+  providerReference: string | null;
+  failureReason: string | null;
+  createdAt: string;
+};
+
+export type UnifiedBookingPaymentSnapshot = {
+  id: string;
+  status: string;
+  payment: {
+    policy: string;
+    gateway: UnifiedPaymentGateway | null;
+    status: UnifiedPaymentStatus;
+    currencyCode: string;
+    reference: string | null;
+    authorizedAmount: number;
+    capturedAmount: number;
+    refundedAmount: number;
+    errorMessage: string | null;
+    updatedAt: string;
+  };
+  operations: UnifiedBookingPaymentOperation[];
+};
+
+export type UnifiedPaymentOperationResponse = {
+  success: boolean;
+  operation: {
+    success: boolean;
+    gateway: UnifiedPaymentGateway;
+    operationType: string;
+    operationStatus: string;
+    paymentStatus: UnifiedPaymentStatus;
+    amount: number;
+    currencyCode: string;
+    gatewayReference?: string | null;
+    providerReference?: string | null;
+    message?: string | null;
+  } | null;
+  message: string | null;
+  booking: UnifiedBookingPaymentSnapshot;
+};
+
+export type UnifiedPaymentWebhookPayload = {
+  bookingId?: string;
+  gatewayReference?: string;
+  paymentStatus: UnifiedPaymentStatus;
+  operationType?: "CHARGE" | "AUTHORIZE" | "CAPTURE" | "VOID" | "REFUND";
+  operationStatus?: "SUCCEEDED" | "FAILED";
+  gateway?: UnifiedPaymentGateway;
+  amount?: number;
+  currencyCode?: "ILS" | "USD" | "EUR" | "GBP";
+  providerReference?: string | null;
+  message?: string | null;
+  idempotencyKey?: string | null;
+  payload?: unknown;
+};
