@@ -1055,6 +1055,50 @@ export function maskApiKey(apiKey: string) {
 
   return `${apiKey.slice(0, 2)}${"*".repeat(Math.max(4, apiKey.length - 4))}${apiKey.slice(-2)}`;
 }
+function readCredentialFromEnv(names: string[]) {
+  for (const name of names) {
+    const value = process.env[name]?.trim();
+    if (!value || /^\{\{[^{}]+\}\}$/.test(value)) {
+      continue;
+    }
+    return value;
+  }
+
+  return null;
+}
+function decryptProviderCredential(options: {
+  encryptedValue: string | null;
+  fallbackEnvNames?: string[];
+  missingCredentialMessage: string;
+}) {
+  const fallbackValue = options.fallbackEnvNames
+    ? readCredentialFromEnv(options.fallbackEnvNames)
+    : null;
+
+  if (!options.encryptedValue) {
+    if (fallbackValue) {
+      return fallbackValue;
+    }
+    throw new Error(options.missingCredentialMessage);
+  }
+
+  try {
+    return decryptApiKey(options.encryptedValue);
+  } catch (error) {
+    if (fallbackValue) {
+      return fallbackValue;
+    }
+    if (
+      error instanceof Error &&
+      error.message.toLowerCase().includes("unable to authenticate data")
+    ) {
+      throw new Error(
+        "Failed to decrypt provider credentials. Re-enter credentials in admin or set runtime secret environment variables.",
+      );
+    }
+    throw error;
+  }
+}
 
 export async function logProviderEvent(
   providerId: string,
@@ -1083,21 +1127,32 @@ async function fetchProviderHotelPayload(providerId: string) {
     throw new Error("Provider not found");
   }
 
-  const apiKey = decryptApiKey(provider.apiKeyEncrypted);
   let endpointUrl = resolveProviderEndpointUrl(provider.endpoint, provider.hotelsPath);
   let requestHeaders: Record<string, string> = {
     Accept: "application/json",
   };
 
   if (isRapidProvider(provider)) {
+    const apiKey = decryptProviderCredential({
+      encryptedValue: provider.apiKeyEncrypted,
+      fallbackEnvNames: ["RAPID_PROVIDER_API_KEY", "RAPID_API_KEY"],
+      missingCredentialMessage: "Rapid provider API key is missing",
+    });
     const authMode = resolveRapidAuthMode(provider.endpoint);
-    if (authMode === "ean-signature" && !provider.apiSecretEncrypted) {
-      throw new Error("Rapid provider requires a shared secret");
+    let sharedSecret: string | undefined;
+    if (authMode === "ean-signature") {
+      sharedSecret = decryptProviderCredential({
+        encryptedValue: provider.apiSecretEncrypted,
+        fallbackEnvNames: [
+          "RAPID_PROVIDER_API_SECRET",
+          "RAPID_PROVIDER_SHARED_SECRET",
+          "RAPID_API_SECRET",
+          "RAPID_SHARED_SECRET",
+        ],
+        missingCredentialMessage: "Rapid provider requires a shared secret",
+      });
     }
     endpointUrl = appendRapidDefaultQueryParams(endpointUrl);
-    const sharedSecret = provider.apiSecretEncrypted
-      ? decryptApiKey(provider.apiSecretEncrypted)
-      : undefined;
     requestHeaders = buildRapidRequestHeaders({
       apiKey,
       endpoint: provider.endpoint,
@@ -1106,16 +1161,26 @@ async function fetchProviderHotelPayload(providerId: string) {
       requireCustomerIp: false,
     });
   } else if (isHotelbedsProvider(provider)) {
-    if (!provider.apiSecretEncrypted) {
-      throw new Error("Hotelbeds provider requires an API secret");
-    }
-    const sharedSecret = decryptApiKey(provider.apiSecretEncrypted);
+    const apiKey = decryptProviderCredential({
+      encryptedValue: provider.apiKeyEncrypted,
+      fallbackEnvNames: ["HOTELBEDS_PROVIDER_API_KEY", "HOTELBEDS_API_KEY"],
+      missingCredentialMessage: "Hotelbeds provider API key is missing",
+    });
+    const sharedSecret = decryptProviderCredential({
+      encryptedValue: provider.apiSecretEncrypted,
+      fallbackEnvNames: ["HOTELBEDS_PROVIDER_API_SECRET", "HOTELBEDS_API_SECRET"],
+      missingCredentialMessage: "Hotelbeds provider requires an API secret",
+    });
     const { signature } = buildHotelbedsSignature(apiKey, sharedSecret);
     requestHeaders["Api-key"] = apiKey;
     requestHeaders["X-Signature"] = signature;
     requestHeaders["Accept-Encoding"] = "gzip";
     requestHeaders["User-Agent"] = process.env.HOTELBEDS_USER_AGENT?.trim() || "BookMeNow/1.0";
   } else {
+    const apiKey = decryptProviderCredential({
+      encryptedValue: provider.apiKeyEncrypted,
+      missingCredentialMessage: "Provider API key is missing",
+    });
     requestHeaders.Authorization = `Bearer ${apiKey}`;
     requestHeaders["x-api-key"] = apiKey;
   }
@@ -1128,6 +1193,45 @@ async function fetchProviderHotelPayload(providerId: string) {
   return { provider, response, payload };
 }
 
+function extractProviderErrorMessage(payload: unknown, fallback: string) {
+  if (typeof payload === "string") {
+    const normalized = payload.trim();
+    return normalized || fallback;
+  }
+
+  if (!payload || typeof payload !== "object") {
+    return fallback;
+  }
+
+  const record = payload as Record<string, unknown>;
+  const directMessageCandidates = [
+    record.message,
+    record.error,
+    record.error_description,
+    record.description,
+  ];
+  for (const candidate of directMessageCandidates) {
+    if (typeof candidate === "string" && candidate.trim()) {
+      return candidate.trim();
+    }
+  }
+
+  const errors = record.errors;
+  if (Array.isArray(errors)) {
+    for (const item of errors) {
+      if (!item || typeof item !== "object") {
+        continue;
+      }
+      const itemRecord = item as Record<string, unknown>;
+      const candidate = itemRecord.message ?? itemRecord.description ?? itemRecord.error;
+      if (typeof candidate === "string" && candidate.trim()) {
+        return candidate.trim();
+      }
+    }
+  }
+
+  return fallback;
+}
 export async function fetchNormalizedHotelsForProvider(options: {
   providerId: string;
   checkInDate?: Date;
@@ -1138,7 +1242,9 @@ export async function fetchNormalizedHotelsForProvider(options: {
   const { provider, response, payload } = await fetchProviderHotelPayload(options.providerId);
 
   if (!response.ok) {
-    throw new Error(`Provider fetch failed (${response.status})`);
+    throw new Error(
+      extractProviderErrorMessage(payload, `Provider fetch failed (${response.status})`),
+    );
   }
 
   const rawHotels = resolveHotelsArray(payload);
@@ -1180,7 +1286,10 @@ export async function testHotelProviderConnection(providerId: string) {
     const hotels = resolveHotelsArray(payload);
 
     if (!response.ok) {
-      const message = `Provider test failed (${response.status})`;
+      const message = extractProviderErrorMessage(
+        payload,
+        `Provider test failed (${response.status})`,
+      );
       await prisma.hotelApiProvider.update({
         where: { id: provider.id },
         data: {
@@ -1276,7 +1385,7 @@ export async function syncHotelProviderData(providerId: string, trigger: "manual
   try {
     const { response, payload } = await fetchProviderHotelPayload(provider.id);
     if (!response.ok) {
-      const message = `Sync failed with status ${response.status}`;
+      const message = extractProviderErrorMessage(payload, `Sync failed with status ${response.status}`);
       await prisma.hotelApiProvider.update({
         where: { id: provider.id },
         data: {

@@ -86,6 +86,7 @@ type SearchResultHotel = {
 
 type TopDeal = {
   id: string;
+  hotelId: string;
   name: string;
   location: string;
   imageUrl: string;
@@ -108,6 +109,9 @@ type DestinationBanner = {
   discountPercent: number;
   gradientClass: string;
 };
+type FeaturedHotDealBanner =
+  | { kind: "hotel"; deal: TopDeal }
+  | { kind: "destination"; banner: DestinationBanner };
 type WeekendUrgencyDeal = {
   id: string;
   name: string;
@@ -617,7 +621,8 @@ export async function SearchPageView({
             basePrice > 0 ? Math.max(1, Math.round(basePrice * (1 - discountRate / 100))) : 0;
 
           return {
-            id: hotel.id,
+            id: `live-${hotel.id}`,
+            hotelId: hotel.id,
             name: asText(hotel.name),
             location: asText(hotel.location),
             imageUrl: images[0] ?? "",
@@ -630,6 +635,71 @@ export async function SearchPageView({
         })
         .filter((deal) => deal.basePrice > 0)
     : [];
+  const manualDeals = showTopDeals
+    ? await prisma.deal.findMany({
+        where: {
+          isActive: true,
+          validFrom: { lte: new Date() },
+          validTo: { gte: new Date() },
+          hotel: { status: "APPROVED" },
+        },
+        orderBy: [{ updatedAt: "desc" }],
+        take: 32,
+        include: {
+          hotel: {
+            select: {
+              id: true,
+              name: true,
+              location: true,
+              description: true,
+              images: true,
+              roomTypes: { select: { pricePerNight: true } },
+            },
+          },
+        },
+      })
+    : [];
+  const manualTopDeals: TopDeal[] = manualDeals
+    .map((deal) => {
+      const imageUrl = parseImages(deal.hotel.images)[0] ?? "";
+      const baseRateCandidates = deal.hotel.roomTypes
+        .map((roomType) => Number(roomType.pricePerNight) || 0)
+        .filter((price) => price > 0);
+      const inferredBasePrice = baseRateCandidates.length > 0 ? Math.min(...baseRateCandidates) : 0;
+      const basePrice = inferredBasePrice > 0 ? inferredBasePrice : deal.dealPrice;
+
+      return {
+        id: `manual-${deal.id}`,
+        hotelId: deal.hotel.id,
+        name: deal.title?.trim() || deal.hotel.name,
+        location: deal.hotel.location,
+        imageUrl,
+        description: shortenDescription(deal.description || deal.hotel.description, 110),
+        tag: isHebrew ? "דיל ידני" : "Manual deal",
+        ratingLabel: isHebrew ? "ידני" : "Manual",
+        basePrice,
+        dealPrice: Math.max(1, Number(deal.dealPrice) || 0),
+      };
+    })
+    .filter((deal) => deal.dealPrice > 0);
+  const featuredHotDealBanners: FeaturedHotDealBanner[] = [];
+  const usedFeaturedHotelIds = new Set<string>();
+  for (const deal of [...topDeals, ...manualTopDeals]) {
+    if (featuredHotDealBanners.length >= 8) {
+      break;
+    }
+    if (usedFeaturedHotelIds.has(deal.hotelId)) {
+      continue;
+    }
+    usedFeaturedHotelIds.add(deal.hotelId);
+    featuredHotDealBanners.push({ kind: "hotel", deal });
+  }
+  for (const banner of DESTINATION_BANNERS) {
+    if (featuredHotDealBanners.length >= 8) {
+      break;
+    }
+    featuredHotDealBanners.push({ kind: "destination", banner });
+  }
   const weekendRange = getUpcomingWeekendRange();
   const weekendCheckInParam = formatDateParam(weekendRange.checkIn);
   const weekendCheckOutParam = formatDateParam(weekendRange.checkOut);
@@ -1204,55 +1274,103 @@ export async function SearchPageView({
             </div>
           </div>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            {DESTINATION_BANNERS.map((banner) => {
-              const city = isHebrew ? banner.cityHe : banner.cityEn;
-              const country = isHebrew ? banner.countryHe : banner.countryEn;
-              const searchHref = buildDestinationSearchHref(searchActionPath, params, city, country);
-              return (
-                <Link
-                  key={banner.id}
-                  href={searchHref}
+            {featuredHotDealBanners.map((item) =>
+              item.kind === "hotel" ? (
+                <article
+                  key={`featured-hot-deal-${item.deal.id}`}
                   className="group overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
                 >
                   <div
-                    className={`relative h-52 w-full bg-gradient-to-b bg-cover bg-center ${banner.gradientClass}`}
+                    className="relative h-52 w-full bg-slate-200 bg-cover bg-center"
+                    style={item.deal.imageUrl ? { backgroundImage: `url(${item.deal.imageUrl})` } : undefined}
                   >
                     <span className="absolute left-3 top-3 rounded-full bg-[var(--color-cta)] px-2.5 py-1 text-xs font-semibold text-slate-900">
-                      {isHebrew
-                        ? `עד ${banner.discountPercent}% הנחה`
-                        : `Up to ${banner.discountPercent}% off`}
+                      {item.deal.tag}
                     </span>
-                    <span className="absolute right-3 top-3 rounded-full bg-white/25 px-2.5 py-1 text-[11px] font-semibold text-white">
-                      {isHebrew ? banner.badgeHe : banner.badgeEn}
+                    <span className="absolute right-3 top-3 rounded-full bg-white/90 px-2.5 py-1 text-[11px] font-semibold text-blue-700">
+                      {item.deal.ratingLabel}
                     </span>
                     <span className="absolute bottom-3 left-3 rounded-full bg-black/70 px-2 py-1 text-[11px] font-semibold text-white">
-                      {isHebrew ? "יעד חם" : "Hot destination"}
+                      {isHebrew ? "דיל חם" : "Hot deal"}
                     </span>
                   </div>
                   <div className="space-y-3 p-4">
                     <div>
-                      <h3 className="inline-flex items-center gap-2 text-base font-semibold text-slate-900">
-                        <span>{city}</span>
-                        <span className="rounded-lg bg-blue-50 px-2 py-0.5 text-[11px] font-semibold text-blue-700">
-                          {country}
-                        </span>
-                      </h3>
+                      <h3 className="text-base font-semibold text-slate-900">{item.deal.name}</h3>
+                      <p className="text-sm text-slate-500">{item.deal.location}</p>
                     </div>
-                    <p className="text-sm leading-6 text-slate-600">
-                      {isHebrew ? banner.teaserHe : banner.teaserEn}
-                    </p>
+                    <p className="text-sm leading-6 text-slate-600">{item.deal.description}</p>
                     <div className="flex items-end justify-between gap-2 pt-1">
-                      <span className="text-xs text-slate-500">
-                        {isHebrew ? "מבצע נבחר ליעד" : "Selected destination offer"}
-                      </span>
-                      <span className="rounded-xl bg-[var(--color-primary-light)] px-3 py-2 text-xs font-semibold text-white transition group-hover:brightness-105">
-                        {isHebrew ? "לצפייה בדילים" : "View deals"}
-                      </span>
+                      <div>
+                        <p className="text-xs text-slate-500">
+                          {isHebrew ? "מחיר מבצע" : "Deal price"}
+                        </p>
+                        <p className="text-lg font-bold text-[var(--color-primary-light)]">
+                          {formatCurrency(item.deal.dealPrice)}
+                        </p>
+                      </div>
+                      <Link
+                        href={`/hotels/${item.deal.hotelId}${hotelLinkSuffix ? `?${hotelLinkSuffix}` : ""}`}
+                        className="rounded-xl bg-[var(--color-primary-light)] px-3 py-2 text-xs font-semibold text-white transition group-hover:brightness-105"
+                      >
+                        {isHebrew ? "לצפייה בדיל" : "View deal"}
+                      </Link>
                     </div>
                   </div>
-                </Link>
-              );
-            })}
+                </article>
+              ) : (
+                (() => {
+                  const banner = item.banner;
+                  const city = isHebrew ? banner.cityHe : banner.cityEn;
+                  const country = isHebrew ? banner.countryHe : banner.countryEn;
+                  const searchHref = buildDestinationSearchHref(searchActionPath, params, city, country);
+                  return (
+                    <Link
+                      key={banner.id}
+                      href={searchHref}
+                      className="group overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
+                    >
+                      <div
+                        className={`relative h-52 w-full bg-gradient-to-b bg-cover bg-center ${banner.gradientClass}`}
+                      >
+                        <span className="absolute left-3 top-3 rounded-full bg-[var(--color-cta)] px-2.5 py-1 text-xs font-semibold text-slate-900">
+                          {isHebrew
+                            ? `עד ${banner.discountPercent}% הנחה`
+                            : `Up to ${banner.discountPercent}% off`}
+                        </span>
+                        <span className="absolute right-3 top-3 rounded-full bg-white/25 px-2.5 py-1 text-[11px] font-semibold text-white">
+                          {isHebrew ? banner.badgeHe : banner.badgeEn}
+                        </span>
+                        <span className="absolute bottom-3 left-3 rounded-full bg-black/70 px-2 py-1 text-[11px] font-semibold text-white">
+                          {isHebrew ? "יעד חם" : "Hot destination"}
+                        </span>
+                      </div>
+                      <div className="space-y-3 p-4">
+                        <div>
+                          <h3 className="inline-flex items-center gap-2 text-base font-semibold text-slate-900">
+                            <span>{city}</span>
+                            <span className="rounded-lg bg-blue-50 px-2 py-0.5 text-[11px] font-semibold text-blue-700">
+                              {country}
+                            </span>
+                          </h3>
+                        </div>
+                        <p className="text-sm leading-6 text-slate-600">
+                          {isHebrew ? banner.teaserHe : banner.teaserEn}
+                        </p>
+                        <div className="flex items-end justify-between gap-2 pt-1">
+                          <span className="text-xs text-slate-500">
+                            {isHebrew ? "מבצע נבחר ליעד" : "Selected destination offer"}
+                          </span>
+                          <span className="rounded-xl bg-[var(--color-primary-light)] px-3 py-2 text-xs font-semibold text-white transition group-hover:brightness-105">
+                            {isHebrew ? "לצפייה בדילים" : "View deals"}
+                          </span>
+                        </div>
+                      </div>
+                    </Link>
+                  );
+                })()
+              ),
+            )}
           </div>
         </section>
       )}
@@ -1295,7 +1413,7 @@ export async function SearchPageView({
                   <span className="absolute bottom-3 left-3 rounded-full bg-black/70 px-2 py-1 text-[11px] font-semibold text-white">
                     {isHebrew ? "בחירה מומלצת" : "Popular choice"}
                   </span>
-                  <div className="absolute right-3 top-3">{renderFavoriteControl(deal.id)}</div>
+                  <div className="absolute right-3 top-3">{renderFavoriteControl(deal.hotelId)}</div>
                 </div>
 
                 <div className="space-y-3 p-4">
@@ -1325,7 +1443,7 @@ export async function SearchPageView({
                     </div>
 
                     <Link
-                      href={`/hotels/${deal.id}${hotelLinkSuffix ? `?${hotelLinkSuffix}` : ""}`}
+                      href={`/hotels/${deal.hotelId}${hotelLinkSuffix ? `?${hotelLinkSuffix}` : ""}`}
                       className="rounded-xl bg-[var(--color-primary-light)] px-3 py-2 text-xs font-semibold text-white transition hover:brightness-105"
                     >
                       {isHebrew ? "הזמן עכשיו" : "Book now"}

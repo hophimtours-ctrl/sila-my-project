@@ -1,6 +1,7 @@
 import { PrismaClient } from "@prisma/client";
 import fs from "node:fs";
 import path from "node:path";
+import { withPrismaFirestoreSync } from "@/lib/firebase/prisma-firestore-sync";
 
 const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient };
 
@@ -40,7 +41,7 @@ function resolveDatabaseUrl() {
 
 const databaseUrl = resolveDatabaseUrl();
 
-export const prisma =
+const basePrismaClient =
   globalForPrisma.prisma ??
   new PrismaClient({
     ...(databaseUrl
@@ -54,6 +55,11 @@ export const prisma =
       : {}),
   });
 
+export const prisma =
+  process.env.FIRESTORE_SYNC_ENABLED?.trim().toLowerCase() === "false"
+    ? basePrismaClient
+    : withPrismaFirestoreSync(basePrismaClient);
+
 if (process.env.NODE_ENV !== "production") {
-  globalForPrisma.prisma = prisma;
+  globalForPrisma.prisma = basePrismaClient;
 }
