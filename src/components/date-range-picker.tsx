@@ -124,8 +124,9 @@ export function DateRangePicker({ checkIn, checkOut, language }: DateRangePicker
         <>
           <button
             type="button"
-            aria-label={isHebrew ? "סגירת תאריכון" : "Close date picker"}
             onClick={() => setIsOpen(false)}
+            aria-hidden="true"
+            tabIndex={-1}
             className={`fixed inset-0 z-40 ${isMobileCalendar ? "bg-black/20 backdrop-blur-[1px]" : "bg-black/30"}`}
           />
           <div
@@ -135,6 +136,16 @@ export function DateRangePicker({ checkIn, checkOut, language }: DateRangePicker
                 : "left-1/2 top-1/2 w-[min(94vw,760px)] -translate-x-1/2 -translate-y-1/2 rounded-2xl p-5"
             }`}
           >
+            <div className={`mb-3 flex ${isHebrew ? "justify-start" : "justify-end"}`}>
+              <button
+                type="button"
+                aria-label={isHebrew ? "סגירת תאריכון" : "Close date picker"}
+                onClick={() => setIsOpen(false)}
+                className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 transition hover:bg-slate-100 hover:text-slate-700"
+              >
+                <span aria-hidden>×</span>
+              </button>
+            </div>
             {isMobileCalendar && (
               <div className="mb-3 flex justify-center">
                 <span className="h-1.5 w-14 rounded-full bg-slate-300" />
