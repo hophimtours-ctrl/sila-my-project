@@ -1,6 +1,13 @@
 import { Role } from "@prisma/client";
 import { ownerBlockDateAction, ownerCreateHotelAction, ownerCreateRoomAction } from "@/app/actions";
 import { requireUser } from "@/lib/auth";
+import {
+  BED_TYPE_OPTIONS,
+  getBedTypeLabel,
+  getRoomPaymentPolicyLabel,
+  ROOM_CURRENCY_OPTIONS,
+  ROOM_PAYMENT_POLICY_OPTIONS,
+} from "@/lib/booking-options";
 import { prisma } from "@/lib/db";
 import { formatCurrency } from "@/lib/format";
 
@@ -79,6 +86,31 @@ export default async function OwnerPage({
               placeholder="מקסימום אורחים"
               className="w-full rounded-lg border p-2"
             />
+            <select name="bedType" defaultValue={BED_TYPE_OPTIONS[0]?.value} className="w-full rounded-lg border p-2">
+              {BED_TYPE_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+            <select
+              name="paymentPolicy"
+              defaultValue={ROOM_PAYMENT_POLICY_OPTIONS[0]?.value}
+              className="w-full rounded-lg border p-2"
+            >
+              {ROOM_PAYMENT_POLICY_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+            <select name="currencyCode" defaultValue={ROOM_CURRENCY_OPTIONS[0]?.value} className="w-full rounded-lg border p-2">
+              {ROOM_CURRENCY_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
             <input
               name="cancellationPolicy"
               required
@@ -126,7 +158,8 @@ export default async function OwnerPage({
                 <h4 className="font-medium">חדרים</h4>
                 {hotel.roomTypes.map((room) => (
                   <p key={room.id} className="text-sm">
-                    {room.name} · {formatCurrency(room.pricePerNight)}
+                    {room.name} · {getBedTypeLabel(room.bedType)} · {getRoomPaymentPolicyLabel(room.paymentPolicy)} ·{" "}
+                    {formatCurrency(room.pricePerNight, room.currencyCode)}
                   </p>
                 ))}
               </div>

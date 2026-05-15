@@ -44,7 +44,7 @@ export default async function AdminProvidersPage({
           <input name="endpoint" required placeholder="Endpoint" className="rounded-lg border p-2" />
           <input name="hotelsPath" defaultValue="/hotels" placeholder="Hotels Path" className="rounded-lg border p-2" />
           <input name="apiKey" required placeholder="API Key" className="rounded-lg border p-2" />
-          <input name="apiSecret" placeholder="Shared Secret (ל-Rapid)" className="rounded-lg border p-2" />
+          <input name="apiSecret" placeholder="Shared Secret / API Secret (Rapid, Hotelbeds)" className="rounded-lg border p-2" />
           <select name="enabled" defaultValue="true" className="rounded-lg border p-2">
             <option value="true">פעיל</option>
             <option value="false">לא פעיל</option>
@@ -84,7 +84,7 @@ export default async function AdminProvidersPage({
               <input name="apiKey" placeholder="השאר ריק כדי לא לעדכן מפתח" className="rounded-lg border p-2 md:col-span-3" />
               <input
                 name="apiSecret"
-                placeholder="השאר ריק כדי לא לעדכן Shared Secret"
+                placeholder="השאר ריק כדי לא לעדכן Shared Secret / API Secret"
                 className="rounded-lg border p-2 md:col-span-3"
               />
               <select name="enabled" defaultValue={String(provider.enabled)} className="rounded-lg border p-2">

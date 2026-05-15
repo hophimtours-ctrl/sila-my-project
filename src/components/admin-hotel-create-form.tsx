@@ -46,6 +46,8 @@ const FACILITY_OPTIONS = [
 ];
 const DATA_SOURCE_MODES = ["MANUAL", "API", "HYBRID"] as const;
 const HOTEL_STATUSES = ["PENDING", "APPROVED", "REJECTED"] as const;
+const HOTEL_MARKUP_MODES = ["PERCENTAGE", "AMOUNT", "MAX"] as const;
+const SUPPLIER_TYPES = ["HOTELBEDS", "MANUAL", "DIRECT"] as const;
 
 export function AdminHotelCreateForm({
   action,
@@ -184,6 +186,46 @@ export function AdminHotelCreateForm({
             loading="lazy"
             referrerPolicy="no-referrer-when-downgrade"
             className="h-64 w-full border-0"
+          />
+        </div>
+      </div>
+      <div className="rounded-lg border border-slate-200 p-3 md:col-span-2">
+        <p className="text-sm font-semibold text-slate-900">הגדרות פיננסיות</p>
+        <p className="mt-1 text-xs text-slate-500">
+          מחירי חדרים ידניים מוזנים כנטו, ומחיר המכירה מחושב לפי מרקאפ המלון.
+        </p>
+        <div className="mt-3 grid gap-2 md:grid-cols-2">
+          <select name="supplierType" defaultValue="MANUAL" className="rounded-lg border p-2">
+            {SUPPLIER_TYPES.map((type) => (
+              <option key={type} value={type}>
+                {type}
+              </option>
+            ))}
+          </select>
+          <select name="markupMode" defaultValue="PERCENTAGE" className="rounded-lg border p-2">
+            {HOTEL_MARKUP_MODES.map((mode) => (
+              <option key={mode} value={mode}>
+                {mode}
+              </option>
+            ))}
+          </select>
+          <input
+            name="markupPercentage"
+            type="number"
+            min={0}
+            step="0.01"
+            defaultValue={0}
+            placeholder="אחוז מרקאפ"
+            className="rounded-lg border p-2"
+          />
+          <input
+            name="markupAmount"
+            type="number"
+            min={0}
+            step="0.01"
+            defaultValue={0}
+            placeholder="מרקאפ קבוע"
+            className="rounded-lg border p-2"
           />
         </div>
       </div>

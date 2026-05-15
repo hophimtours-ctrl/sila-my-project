@@ -7,6 +7,11 @@ import type {
   UnifiedRoomSummary,
 } from "@/lib/unified/contracts";
 import { prisma } from "@/lib/db";
+import {
+  buildLocationNeedles,
+  includesAnyLocationNeedle,
+  normalizeLocationText,
+} from "@/lib/search/location-match";
 
 function toPositiveInt(value: number | undefined, fallback: number, max: number) {
   if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
@@ -15,9 +20,6 @@ function toPositiveInt(value: number | undefined, fallback: number, max: number)
   return Math.min(max, Math.floor(value));
 }
 
-function normalizeText(value?: string) {
-  return (value ?? "").trim().toLowerCase();
-}
 
 function toStringArray(value: unknown) {
   if (!Array.isArray(value)) {
@@ -87,9 +89,9 @@ async function search(query: UnifiedHotelSearchQuery = {}): Promise<UnifiedHotel
     typeof query.guests === "number" && Number.isFinite(query.guests) && query.guests > 0
       ? Math.floor(query.guests)
       : null;
-  const cityQuery = normalizeText(query.city);
-  const countryQuery = normalizeText(query.country);
-  const facilityQuery = normalizeText(query.facility);
+  const cityNeedles = buildLocationNeedles(query.city);
+  const countryNeedles = buildLocationNeedles(query.country);
+  const facilityQuery = normalizeLocationText(query.facility);
 
   const hotels = await prisma.hotel.findMany({
     where: { status: HotelStatus.APPROVED },
@@ -126,21 +128,21 @@ async function search(query: UnifiedHotelSearchQuery = {}): Promise<UnifiedHotel
       return items;
     }
 
-    const normalizedName = normalizeText(hotel.name);
-    const normalizedLocation = normalizeText(hotel.location);
-    const normalizedCity = normalizeText(hotel.city ?? undefined);
-    const normalizedCountry = normalizeText(hotel.country ?? undefined);
-    const normalizedFacilities = facilities.map((facility) => normalizeText(facility));
+    const normalizedFacilities = facilities.map((facility) => normalizeLocationText(facility));
 
     if (
-      cityQuery &&
-      !normalizedCity.includes(cityQuery) &&
-      !normalizedLocation.includes(cityQuery) &&
-      !normalizedName.includes(cityQuery)
+      cityNeedles.length > 0 &&
+      !includesAnyLocationNeedle(hotel.city, cityNeedles) &&
+      !includesAnyLocationNeedle(hotel.location, cityNeedles) &&
+      !includesAnyLocationNeedle(hotel.name, cityNeedles)
     ) {
       return items;
     }
-    if (countryQuery && !normalizedCountry.includes(countryQuery) && !normalizedLocation.includes(countryQuery)) {
+    if (
+      countryNeedles.length > 0 &&
+      !includesAnyLocationNeedle(hotel.country, countryNeedles) &&
+      !includesAnyLocationNeedle(hotel.location, countryNeedles)
+    ) {
       return items;
     }
     if (

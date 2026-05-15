@@ -14,6 +14,7 @@ import { prisma } from "@/lib/db";
 import { AdminManagementShell } from "@/components/admin-management-shell";
 import { AdminHotelCreateForm } from "@/components/admin-hotel-create-form";
 import { redirect } from "next/navigation";
+import { BED_TYPE_OPTIONS, ROOM_CURRENCY_OPTIONS, ROOM_PAYMENT_POLICY_OPTIONS } from "@/lib/booking-options";
 import { ROOM_TYPE_OPTIONS } from "@/lib/room-type-options";
 const ownerAdminNavigationItems = [
   { href: "/admin/hotels", label: "ניהול מלונות" },
@@ -155,7 +156,7 @@ export default async function AdminHotelsPage({
                     min={1}
                     required
                     defaultValue={450}
-                    placeholder="מחיר ללילה"
+                    placeholder="מחיר נטו ללילה"
                     className="rounded-lg border p-2 text-sm"
                   />
                   <input
@@ -167,6 +168,31 @@ export default async function AdminHotelsPage({
                     placeholder="מקסימום אורחים"
                     className="rounded-lg border p-2 text-sm"
                   />
+                  <select name="bedType" defaultValue={BED_TYPE_OPTIONS[0]?.value} className="rounded-lg border p-2 text-sm">
+                    {BED_TYPE_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                  <select
+                    name="paymentPolicy"
+                    defaultValue={ROOM_PAYMENT_POLICY_OPTIONS[0]?.value}
+                    className="rounded-lg border p-2 text-sm"
+                  >
+                    {ROOM_PAYMENT_POLICY_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                  <select name="currencyCode" defaultValue={ROOM_CURRENCY_OPTIONS[0]?.value} className="rounded-lg border p-2 text-sm">
+                    {ROOM_CURRENCY_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
                   <input
                     name="cancellationPolicy"
                     required
@@ -226,6 +252,7 @@ export default async function AdminHotelsPage({
                             min={1}
                             required
                             defaultValue={roomType.pricePerNight}
+                            placeholder="מחיר נטו ללילה"
                             className="rounded-lg border p-2 text-sm"
                           />
                           <input
@@ -236,6 +263,37 @@ export default async function AdminHotelsPage({
                             defaultValue={roomType.maxGuests}
                             className="rounded-lg border p-2 text-sm"
                           />
+                          <select name="bedType" required defaultValue={roomType.bedType} className="rounded-lg border p-2 text-sm">
+                            {BED_TYPE_OPTIONS.map((option) => (
+                              <option key={option.value} value={option.value}>
+                                {option.label}
+                              </option>
+                            ))}
+                          </select>
+                          <select
+                            name="paymentPolicy"
+                            required
+                            defaultValue={roomType.paymentPolicy}
+                            className="rounded-lg border p-2 text-sm"
+                          >
+                            {ROOM_PAYMENT_POLICY_OPTIONS.map((option) => (
+                              <option key={option.value} value={option.value}>
+                                {option.label}
+                              </option>
+                            ))}
+                          </select>
+                          <select
+                            name="currencyCode"
+                            required
+                            defaultValue={roomType.currencyCode}
+                            className="rounded-lg border p-2 text-sm"
+                          >
+                            {ROOM_CURRENCY_OPTIONS.map((option) => (
+                              <option key={option.value} value={option.value}>
+                                {option.label}
+                              </option>
+                            ))}
+                          </select>
                           <input
                             name="cancellationPolicy"
                             required

@@ -46,6 +46,66 @@ env:
     availability:
       - BUILD
       - RUNTIME
+  - variable: SMTP_PORT
+    value: "587"
+    availability:
+      - RUNTIME
+  - variable: SMTP_SECURE
+    value: "false"
+    availability:
+      - RUNTIME
+  - variable: SMTP_HOST
+    secret: SMTP_HOST
+    availability:
+      - RUNTIME
+  - variable: SMTP_USER
+    secret: SMTP_USER
+    availability:
+      - RUNTIME
+  - variable: SMTP_PASS
+    secret: SMTP_PASS
+    availability:
+      - RUNTIME
+  - variable: BOOKING_CONFIRMATION_FROM
+    secret: BOOKING_CONFIRMATION_FROM
+    availability:
+      - RUNTIME
+  - variable: UNIFIED_PAYMENTS_WEBHOOK_SECRET
+    secret: UNIFIED_PAYMENTS_WEBHOOK_SECRET
+    availability:
+      - RUNTIME
+  - variable: OTA_ISRAEL_GATEWAY_MODE
+    value: http
+    availability:
+      - RUNTIME
+  - variable: OTA_ISRAEL_GATEWAY_ENDPOINT
+    value: https://restapidev.payplus.co.il/api/v1.0/PaymentPages/generateLink
+    availability:
+      - RUNTIME
+  - variable: OTA_ISRAEL_GATEWAY_API_KEY
+    secret: OTA_ISRAEL_GATEWAY_API_KEY
+    availability:
+      - RUNTIME
+  - variable: HOTELBEDS_PROVIDER_ENDPOINT
+    value: https://api.test.hotelbeds.com
+    availability:
+      - RUNTIME
+  - variable: HOTELBEDS_PROVIDER_HOTELS_PATH
+    value: /hotel-content-api/1.0/hotels
+    availability:
+      - RUNTIME
+  - variable: HOTELBEDS_PROVIDER_ENABLED
+    value: "true"
+    availability:
+      - RUNTIME
+  - variable: HOTELBEDS_PROVIDER_API_KEY
+    secret: HOTELBEDS_PROVIDER_API_KEY
+    availability:
+      - RUNTIME
+  - variable: HOTELBEDS_PROVIDER_API_SECRET
+    secret: HOTELBEDS_PROVIDER_API_SECRET
+    availability:
+      - RUNTIME
 
   # Grant access to secrets in Cloud Secret Manager.
   # You can create secrets with the CLI command `firebase apphosting:secrets:set <secretName>`.

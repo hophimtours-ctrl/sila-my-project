@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { cookies } from "next/headers";
-import { BookingStatus, HotelStatus } from "@prisma/client";
+import { BookingStatus } from "@prisma/client";
 import { differenceInCalendarDays } from "date-fns";
 import {
   addFavoriteAction,
@@ -28,16 +28,28 @@ import {
 } from "@/lib/mock-favorites";
 import { fetchMockHotels } from "@/lib/mock-hotels-api";
 import type { MockHotel } from "@/lib/mock-hotels";
+import { fetchUnifiedHotelsSearch } from "@/lib/unified/hotels-api";
+import type { UnifiedHotel } from "@/lib/unified/contracts";
+import {
+  buildLocationNeedles,
+  includesAnyLocationNeedle,
+} from "@/lib/search/location-match";
 
 export type SearchPageParams = {
   category?: string;
   city?: string;
+  country?: string;
   checkIn?: string;
   checkOut?: string;
   guests?: string;
+  adults?: string;
+  children?: string;
+  rooms?: string;
   facility?: string | string[];
   star?: string | string[];
   priceBand?: string | string[];
+  providerCode?: string;
+  providerId?: string;
   view?: string;
 };
 type SearchResultsLayout = "gallery" | "horizontal";
@@ -74,6 +86,7 @@ type SearchResultHotel = {
 
 type TopDeal = {
   id: string;
+  hotelId: string;
   name: string;
   location: string;
   imageUrl: string;
@@ -83,6 +96,22 @@ type TopDeal = {
   basePrice: number;
   dealPrice: number;
 };
+type DestinationBanner = {
+  id: string;
+  cityHe: string;
+  cityEn: string;
+  countryHe: string;
+  countryEn: string;
+  badgeHe: string;
+  badgeEn: string;
+  teaserHe: string;
+  teaserEn: string;
+  discountPercent: number;
+  gradientClass: string;
+};
+type FeaturedHotDealBanner =
+  | { kind: "hotel"; deal: TopDeal }
+  | { kind: "destination"; banner: DestinationBanner };
 type WeekendUrgencyDeal = {
   id: string;
   name: string;
@@ -159,6 +188,112 @@ const HOTEL_CHAINS = {
   he: ["פתאל", "ישרוטל", "דן", "לאונרדו", "הרברט סמואל", "בראון"],
   en: ["Fattal", "Isrotel", "Dan Hotels", "Leonardo", "Herbert Samuel", "Brown Hotels"],
 } as const;
+const DESTINATION_BANNERS: DestinationBanner[] = [
+  {
+    id: "athens-greece",
+    cityHe: "אתונה",
+    cityEn: "Athens",
+    countryHe: "יוון",
+    countryEn: "Greece",
+    badgeHe: "דיל קלאסי",
+    badgeEn: "Classic deal",
+    teaserHe: "מלונות במרכז העיר עם חוויית לילה תוססת",
+    teaserEn: "Central stays with vibrant nightlife",
+    discountPercent: 22,
+    gradientClass: "from-sky-500 via-cyan-500 to-blue-700",
+  },
+  {
+    id: "crete-greece",
+    cityHe: "כרתים",
+    cityEn: "Crete",
+    countryHe: "יוון",
+    countryEn: "Greece",
+    badgeHe: "חופשת קיץ",
+    badgeEn: "Summer escape",
+    teaserHe: "חופים, ריזורטים ודילים של הרגע האחרון",
+    teaserEn: "Beaches, resorts, and last-minute prices",
+    discountPercent: 28,
+    gradientClass: "from-teal-500 via-emerald-500 to-cyan-700",
+  },
+  {
+    id: "paphos-cyprus",
+    cityHe: "פאפוס",
+    cityEn: "Paphos",
+    countryHe: "קפריסין",
+    countryEn: "Cyprus",
+    badgeHe: "הכי מבוקש",
+    badgeEn: "Most wanted",
+    teaserHe: "מלונות עם בריכה וטיסות קצרות",
+    teaserEn: "Pool hotels with short flights",
+    discountPercent: 24,
+    gradientClass: "from-indigo-500 via-blue-500 to-sky-700",
+  },
+  {
+    id: "rome-italy",
+    cityHe: "רומא",
+    cityEn: "Rome",
+    countryHe: "איטליה",
+    countryEn: "Italy",
+    badgeHe: "חופשה אורבנית",
+    badgeEn: "City getaway",
+    teaserHe: "מלונות ליד האטרקציות עם מחירים חמים",
+    teaserEn: "Stays near landmarks with hot rates",
+    discountPercent: 20,
+    gradientClass: "from-amber-500 via-orange-500 to-rose-600",
+  },
+  {
+    id: "paris-france",
+    cityHe: "פריז",
+    cityEn: "Paris",
+    countryHe: "צרפת",
+    countryEn: "France",
+    badgeHe: "יעד רומנטי",
+    badgeEn: "Romantic pick",
+    teaserHe: "בוטיק במרכז העיר במחירי מבצע",
+    teaserEn: "Boutique stays in prime locations",
+    discountPercent: 18,
+    gradientClass: "from-pink-500 via-rose-500 to-fuchsia-700",
+  },
+  {
+    id: "dubai-uae",
+    cityHe: "דובאי",
+    cityEn: "Dubai",
+    countryHe: "איחוד האמירויות",
+    countryEn: "UAE",
+    badgeHe: "יוקרה משתלמת",
+    badgeEn: "Luxury value",
+    teaserHe: "5 כוכבים עם שדרוגים והנחות",
+    teaserEn: "5-star stays with upgrades and savings",
+    discountPercent: 26,
+    gradientClass: "from-violet-600 via-indigo-600 to-purple-800",
+  },
+  {
+    id: "bangkok-thailand",
+    cityHe: "בנגקוק",
+    cityEn: "Bangkok",
+    countryHe: "תאילנד",
+    countryEn: "Thailand",
+    badgeHe: "חם עכשיו",
+    badgeEn: "Hot now",
+    teaserHe: "יעד אקזוטי עם מלונות מעולים לכל תקציב",
+    teaserEn: "Exotic destination for every budget",
+    discountPercent: 30,
+    gradientClass: "from-lime-500 via-emerald-500 to-teal-700",
+  },
+  {
+    id: "london-uk",
+    cityHe: "לונדון",
+    cityEn: "London",
+    countryHe: "בריטניה",
+    countryEn: "United Kingdom",
+    badgeHe: "סוף שבוע באירופה",
+    badgeEn: "Europe weekend",
+    teaserHe: "מלונות נוחים ליד תחבורה ואטרקציות",
+    teaserEn: "Comfortable stays near top attractions",
+    discountPercent: 17,
+    gradientClass: "from-slate-500 via-gray-600 to-slate-800",
+  },
+];
 
 function parseImages(value: unknown): string[] {
   if (!Array.isArray(value)) {
@@ -186,6 +321,46 @@ function toArrayParam(value?: string | string[]) {
   }
 
   return Array.isArray(value) ? value : [value];
+}
+function buildDestinationSearchHref(
+  searchActionPath: string,
+  params: SearchPageParams,
+  city: string,
+  country?: string,
+) {
+  const query = new URLSearchParams();
+  if (params.category) {
+    query.set("category", params.category);
+  }
+  if (params.providerCode) {
+    query.set("providerCode", params.providerCode);
+  }
+  if (params.providerId) {
+    query.set("providerId", params.providerId);
+  }
+  if (params.checkIn) {
+    query.set("checkIn", params.checkIn);
+  }
+  if (params.checkOut) {
+    query.set("checkOut", params.checkOut);
+  }
+  if (params.guests) {
+    query.set("guests", params.guests);
+  }
+  if (params.adults) {
+    query.set("adults", params.adults);
+  }
+  if (params.children) {
+    query.set("children", params.children);
+  }
+  if (params.rooms) {
+    query.set("rooms", params.rooms);
+  }
+  query.set("city", city);
+  if (country) {
+    query.set("country", country);
+  }
+  return `${searchActionPath}?${query.toString()}`;
 }
 
 function matchesPriceBand(minPrice: number, priceBand: string) {
@@ -291,22 +466,13 @@ function mapMockHotelToRawHotel(hotel: MockHotel): RawSearchHotel {
     source: "mock",
   };
 }
-function mapRealHotelToRawHotel(hotel: {
-  id: string;
-  name: string;
-  location: string;
-  description: string;
-  facilities: unknown;
-  images: unknown;
-  roomTypes: Array<{
-    id: string;
-    pricePerNight: number;
-    inventory: number;
-    availableInventory: number;
-    isAvailable: boolean;
-  }>;
-  reviews: Array<{ rating: number }>;
-}): RawSearchHotel {
+function mapUnifiedHotelToRawHotel(hotel: UnifiedHotel): RawSearchHotel {
+  const reviewRating =
+    typeof hotel.averageReviewScore === "number" && Number.isFinite(hotel.averageReviewScore)
+      ? hotel.averageReviewScore
+      : typeof hotel.rating === "number" && Number.isFinite(hotel.rating)
+        ? hotel.rating
+        : null;
   return {
     id: hotel.id,
     name: hotel.name,
@@ -314,15 +480,15 @@ function mapRealHotelToRawHotel(hotel: {
     description: hotel.description,
     facilities: hotel.facilities,
     images: hotel.images,
-    roomTypes: hotel.roomTypes.map((room) => ({
+    roomTypes: hotel.rooms.map((room) => ({
       id: room.id,
-      pricePerNight: room.pricePerNight,
+      pricePerNight: room.baseRate,
       inventory: room.inventory,
       availableInventory: room.availableInventory,
       isAvailable: room.isAvailable,
     })),
-    reviews: hotel.reviews.map((review) => ({ rating: review.rating })),
-    source: "real",
+    reviews: reviewRating !== null ? [{ rating: reviewRating }] : [],
+    source: hotel.source === "mock" ? "mock" : "real",
   };
 }
 function shuffleItems<T>(items: T[]) {
@@ -363,22 +529,17 @@ export async function SearchPageView({
     hasRequestedDateRange && requestedCheckInDate && requestedCheckOutDate
       ? Math.max(0, differenceInCalendarDays(requestedCheckOutDate, requestedCheckInDate))
       : 0;
-  const requestedNightsLabel =
-    requestedNights > 0
-      ? isHebrew
-        ? requestedNights === 1
-          ? "לילה אחד"
-          : `${requestedNights} לילות`
-        : requestedNights === 1
-          ? "1 night"
-          : `${requestedNights} nights`
-      : null;
-  const cityQuery = params.city?.trim().toLowerCase() ?? "";
+  const cityNeedles = buildLocationNeedles(params.city?.trim());
+  const requestedGuests = Number.parseInt(params.guests ?? "", 10);
+  const normalizedGuests =
+    Number.isFinite(requestedGuests) && requestedGuests > 0 ? requestedGuests : undefined;
   const selectedFacilities = new Set(toArrayParam(params.facility).map((value) => value.toLowerCase()));
   const selectedStars = toArrayParam(params.star)
     .map((value) => Number(value))
     .filter((value): value is number => Number.isInteger(value) && value >= 1 && value <= 5);
   const selectedPriceBands = new Set(toArrayParam(params.priceBand));
+  const providerCodeParam = params.providerCode?.trim();
+  const providerIdParam = params.providerId?.trim();
   const mockInventoryEnabled =
     process.env.NODE_ENV !== "production" ||
     process.env.ENABLE_MOCK_HOTELS_IN_SEARCH?.trim() === "true";
@@ -397,35 +558,35 @@ export async function SearchPageView({
   }
 
   try {
-    const realHotels = await prisma.hotel.findMany({
-      where: { status: HotelStatus.APPROVED },
-      include: {
-        roomTypes: {
-          select: {
-            id: true,
-            pricePerNight: true,
-            inventory: true,
-            availableInventory: true,
-            isAvailable: true,
-          },
-        },
-        reviews: { select: { rating: true } },
-      },
-      orderBy: { updatedAt: "desc" },
-      take: 50,
+    const unifiedResult = await fetchUnifiedHotelsSearch({
+      city: params.city?.trim(),
+      country: params.country?.trim(),
+      guests: normalizedGuests,
+      checkIn: params.checkIn,
+      checkOut: params.checkOut,
+      limit: 50,
+      ...(providerCodeParam && providerIdParam
+        ? { providerCode: providerCodeParam, providerId: providerIdParam }
+        : {}),
     });
-    hotelsRaw = realHotels.map((hotel) => mapRealHotelToRawHotel(hotel));
-    realInventoryCount = hotelsRaw.length;
+
+    if (unifiedResult) {
+      hotelsRaw = unifiedResult.items.map((hotel) => mapUnifiedHotelToRawHotel(hotel));
+      realInventoryCount = hotelsRaw.length;
+    } else {
+      dataLoadError = true;
+    }
 
     if (hotelsRaw.length === 0 && mockInventoryEnabled) {
       const mockHotels = await fetchMockHotels({ limit: 50 });
       hotelsRaw = mockHotels.map((hotel) => mapMockHotelToRawHotel(hotel));
       mockInventoryCount = hotelsRaw.length;
       usingMockInventory = true;
+      dataLoadError = false;
     }
   } catch (error) {
     dataLoadError = true;
-    console.error("Failed to load real search hotels", error);
+    console.error("Failed to load unified search hotels", error);
     if (mockInventoryEnabled) {
       try {
         const mockHotels = await fetchMockHotels({ limit: 50 });
@@ -460,7 +621,8 @@ export async function SearchPageView({
             basePrice > 0 ? Math.max(1, Math.round(basePrice * (1 - discountRate / 100))) : 0;
 
           return {
-            id: hotel.id,
+            id: `live-${hotel.id}`,
+            hotelId: hotel.id,
             name: asText(hotel.name),
             location: asText(hotel.location),
             imageUrl: images[0] ?? "",
@@ -473,6 +635,71 @@ export async function SearchPageView({
         })
         .filter((deal) => deal.basePrice > 0)
     : [];
+  const manualDeals = showTopDeals
+    ? await prisma.deal.findMany({
+        where: {
+          isActive: true,
+          validFrom: { lte: new Date() },
+          validTo: { gte: new Date() },
+          hotel: { status: "APPROVED" },
+        },
+        orderBy: [{ updatedAt: "desc" }],
+        take: 32,
+        include: {
+          hotel: {
+            select: {
+              id: true,
+              name: true,
+              location: true,
+              description: true,
+              images: true,
+              roomTypes: { select: { pricePerNight: true } },
+            },
+          },
+        },
+      })
+    : [];
+  const manualTopDeals: TopDeal[] = manualDeals
+    .map((deal) => {
+      const imageUrl = parseImages(deal.hotel.images)[0] ?? "";
+      const baseRateCandidates = deal.hotel.roomTypes
+        .map((roomType) => Number(roomType.pricePerNight) || 0)
+        .filter((price) => price > 0);
+      const inferredBasePrice = baseRateCandidates.length > 0 ? Math.min(...baseRateCandidates) : 0;
+      const basePrice = inferredBasePrice > 0 ? inferredBasePrice : deal.dealPrice;
+
+      return {
+        id: `manual-${deal.id}`,
+        hotelId: deal.hotel.id,
+        name: deal.title?.trim() || deal.hotel.name,
+        location: deal.hotel.location,
+        imageUrl,
+        description: shortenDescription(deal.description || deal.hotel.description, 110),
+        tag: isHebrew ? "דיל ידני" : "Manual deal",
+        ratingLabel: isHebrew ? "ידני" : "Manual",
+        basePrice,
+        dealPrice: Math.max(1, Number(deal.dealPrice) || 0),
+      };
+    })
+    .filter((deal) => deal.dealPrice > 0);
+  const featuredHotDealBanners: FeaturedHotDealBanner[] = [];
+  const usedFeaturedHotelIds = new Set<string>();
+  for (const deal of [...topDeals, ...manualTopDeals]) {
+    if (featuredHotDealBanners.length >= 8) {
+      break;
+    }
+    if (usedFeaturedHotelIds.has(deal.hotelId)) {
+      continue;
+    }
+    usedFeaturedHotelIds.add(deal.hotelId);
+    featuredHotDealBanners.push({ kind: "hotel", deal });
+  }
+  for (const banner of DESTINATION_BANNERS) {
+    if (featuredHotDealBanners.length >= 8) {
+      break;
+    }
+    featuredHotDealBanners.push({ kind: "destination", banner });
+  }
   const weekendRange = getUpcomingWeekendRange();
   const weekendCheckInParam = formatDateParam(weekendRange.checkIn);
   const weekendCheckOutParam = formatDateParam(weekendRange.checkOut);
@@ -561,6 +788,21 @@ export async function SearchPageView({
   if (params.guests) {
     sharedHotelQuery.set("guests", params.guests);
   }
+  if (params.adults) {
+    sharedHotelQuery.set("adults", params.adults);
+  }
+  if (params.children) {
+    sharedHotelQuery.set("children", params.children);
+  }
+  if (params.rooms) {
+    sharedHotelQuery.set("rooms", params.rooms);
+  }
+  if (params.providerCode) {
+    sharedHotelQuery.set("providerCode", params.providerCode);
+  }
+  if (params.providerId) {
+    sharedHotelQuery.set("providerId", params.providerId);
+  }
   toArrayParam(params.facility).forEach((facility) => {
     sharedHotelQuery.append("facility", facility);
   });
@@ -584,6 +826,14 @@ export async function SearchPageView({
     weekendDealParams.set("category", params.category);
     weekendSearchParams.set("category", params.category);
   }
+  if (params.providerCode) {
+    weekendDealParams.set("providerCode", params.providerCode);
+    weekendSearchParams.set("providerCode", params.providerCode);
+  }
+  if (params.providerId) {
+    weekendDealParams.set("providerId", params.providerId);
+    weekendSearchParams.set("providerId", params.providerId);
+  }
   const weekendDealQuery = weekendDealParams.toString();
   const currentSearchQuery = new URLSearchParams();
   if (params.category) {
@@ -600,6 +850,21 @@ export async function SearchPageView({
   }
   if (params.guests) {
     currentSearchQuery.set("guests", params.guests);
+  }
+  if (params.adults) {
+    currentSearchQuery.set("adults", params.adults);
+  }
+  if (params.children) {
+    currentSearchQuery.set("children", params.children);
+  }
+  if (params.rooms) {
+    currentSearchQuery.set("rooms", params.rooms);
+  }
+  if (params.providerCode) {
+    currentSearchQuery.set("providerCode", params.providerCode);
+  }
+  if (params.providerId) {
+    currentSearchQuery.set("providerId", params.providerId);
   }
   toArrayParam(params.facility).forEach((facility) => currentSearchQuery.append("facility", facility));
   toArrayParam(params.star).forEach((star) => currentSearchQuery.append("star", star));
@@ -642,9 +907,9 @@ export async function SearchPageView({
     const hotelName = asText(hotel.name);
     const hotelLocation = asText(hotel.location);
     const cityMatch =
-      cityQuery.length === 0 ||
-      hotelLocation.toLowerCase().includes(cityQuery) ||
-      hotelName.toLowerCase().includes(cityQuery);
+      cityNeedles.length === 0 ||
+      includesAnyLocationNeedle(hotelLocation, cityNeedles) ||
+      includesAnyLocationNeedle(hotelName, cityNeedles);
 
     if (!cityMatch) {
       return acc;
@@ -876,7 +1141,7 @@ export async function SearchPageView({
     selectedFacilities.size === 0 &&
     selectedStars.length === 0 &&
     selectedPriceBands.size === 0;
-  const displayedHotels = shouldShowRandomRecommended ? shuffleItems(hotels).slice(0, 5) : hotels;
+  const displayedHotels = shouldShowRandomRecommended ? shuffleItems(hotels).slice(0, 8) : hotels;
   const resultsTitle = params.city?.trim()
     ? isHebrew
       ? `מקומות אירוח ב${params.city.trim()}`
@@ -939,6 +1204,8 @@ export async function SearchPageView({
             className="relative z-20 mt-8 rounded-2xl border-4 border-[#7cc7ff] bg-gradient-to-b from-[#eaf7ff] to-white p-2 shadow-2xl"
           >
             {params.category && <input type="hidden" name="category" value={params.category} />}
+            {params.providerCode && <input type="hidden" name="providerCode" value={params.providerCode} />}
+            {params.providerId && <input type="hidden" name="providerId" value={params.providerId} />}
             {toArrayParam(params.facility).map((facility) => (
               <input key={`hero-facility-${facility}`} type="hidden" name="facility" value={facility} />
             ))}
@@ -992,6 +1259,121 @@ export async function SearchPageView({
 
         </div>
       </section>
+      {showTopDeals && (
+        <section className="space-y-4 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <div>
+              <h2 className="text-2xl font-bold text-slate-900 sm:text-3xl">
+                {isHebrew ? "דילים חמים ליעדים מובילים" : "Hot deals for top destinations"}
+              </h2>
+              <p className="mt-1 text-sm text-slate-600">
+                {isHebrew
+                  ? "באנרים אנכיים עם מבצעים נבחרים — לחיצה תוביל ישר לחיפוש היעד."
+                  : "Vertical banners with selected offers — click to jump straight to destination search."}
+              </p>
+            </div>
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            {featuredHotDealBanners.map((item) =>
+              item.kind === "hotel" ? (
+                <article
+                  key={`featured-hot-deal-${item.deal.id}`}
+                  className="group overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
+                >
+                  <div
+                    className="relative h-52 w-full bg-slate-200 bg-cover bg-center"
+                    style={item.deal.imageUrl ? { backgroundImage: `url(${item.deal.imageUrl})` } : undefined}
+                  >
+                    <span className="absolute left-3 top-3 rounded-full bg-[var(--color-cta)] px-2.5 py-1 text-xs font-semibold text-slate-900">
+                      {item.deal.tag}
+                    </span>
+                    <span className="absolute right-3 top-3 rounded-full bg-white/90 px-2.5 py-1 text-[11px] font-semibold text-blue-700">
+                      {item.deal.ratingLabel}
+                    </span>
+                    <span className="absolute bottom-3 left-3 rounded-full bg-black/70 px-2 py-1 text-[11px] font-semibold text-white">
+                      {isHebrew ? "דיל חם" : "Hot deal"}
+                    </span>
+                  </div>
+                  <div className="space-y-3 p-4">
+                    <div>
+                      <h3 className="text-base font-semibold text-slate-900">{item.deal.name}</h3>
+                      <p className="text-sm text-slate-500">{item.deal.location}</p>
+                    </div>
+                    <p className="text-sm leading-6 text-slate-600">{item.deal.description}</p>
+                    <div className="flex items-end justify-between gap-2 pt-1">
+                      <div>
+                        <p className="text-xs text-slate-500">
+                          {isHebrew ? "מחיר מבצע" : "Deal price"}
+                        </p>
+                        <p className="text-lg font-bold text-[var(--color-primary-light)]">
+                          {formatCurrency(item.deal.dealPrice)}
+                        </p>
+                      </div>
+                      <Link
+                        href={`/hotels/${item.deal.hotelId}${hotelLinkSuffix ? `?${hotelLinkSuffix}` : ""}`}
+                        className="rounded-xl bg-[var(--color-primary-light)] px-3 py-2 text-xs font-semibold text-white transition group-hover:brightness-105"
+                      >
+                        {isHebrew ? "לצפייה בדיל" : "View deal"}
+                      </Link>
+                    </div>
+                  </div>
+                </article>
+              ) : (
+                (() => {
+                  const banner = item.banner;
+                  const city = isHebrew ? banner.cityHe : banner.cityEn;
+                  const country = isHebrew ? banner.countryHe : banner.countryEn;
+                  const searchHref = buildDestinationSearchHref(searchActionPath, params, city, country);
+                  return (
+                    <Link
+                      key={banner.id}
+                      href={searchHref}
+                      className="group overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
+                    >
+                      <div
+                        className={`relative h-52 w-full bg-gradient-to-b bg-cover bg-center ${banner.gradientClass}`}
+                      >
+                        <span className="absolute left-3 top-3 rounded-full bg-[var(--color-cta)] px-2.5 py-1 text-xs font-semibold text-slate-900">
+                          {isHebrew
+                            ? `עד ${banner.discountPercent}% הנחה`
+                            : `Up to ${banner.discountPercent}% off`}
+                        </span>
+                        <span className="absolute right-3 top-3 rounded-full bg-white/25 px-2.5 py-1 text-[11px] font-semibold text-white">
+                          {isHebrew ? banner.badgeHe : banner.badgeEn}
+                        </span>
+                        <span className="absolute bottom-3 left-3 rounded-full bg-black/70 px-2 py-1 text-[11px] font-semibold text-white">
+                          {isHebrew ? "יעד חם" : "Hot destination"}
+                        </span>
+                      </div>
+                      <div className="space-y-3 p-4">
+                        <div>
+                          <h3 className="inline-flex items-center gap-2 text-base font-semibold text-slate-900">
+                            <span>{city}</span>
+                            <span className="rounded-lg bg-blue-50 px-2 py-0.5 text-[11px] font-semibold text-blue-700">
+                              {country}
+                            </span>
+                          </h3>
+                        </div>
+                        <p className="text-sm leading-6 text-slate-600">
+                          {isHebrew ? banner.teaserHe : banner.teaserEn}
+                        </p>
+                        <div className="flex items-end justify-between gap-2 pt-1">
+                          <span className="text-xs text-slate-500">
+                            {isHebrew ? "מבצע נבחר ליעד" : "Selected destination offer"}
+                          </span>
+                          <span className="rounded-xl bg-[var(--color-primary-light)] px-3 py-2 text-xs font-semibold text-white transition group-hover:brightness-105">
+                            {isHebrew ? "לצפייה בדילים" : "View deals"}
+                          </span>
+                        </div>
+                      </div>
+                    </Link>
+                  );
+                })()
+              ),
+            )}
+          </div>
+        </section>
+      )}
 
       {showTopDeals && (
         <section className="space-y-4">
@@ -1031,7 +1413,7 @@ export async function SearchPageView({
                   <span className="absolute bottom-3 left-3 rounded-full bg-black/70 px-2 py-1 text-[11px] font-semibold text-white">
                     {isHebrew ? "בחירה מומלצת" : "Popular choice"}
                   </span>
-                  <div className="absolute right-3 top-3">{renderFavoriteControl(deal.id)}</div>
+                  <div className="absolute right-3 top-3">{renderFavoriteControl(deal.hotelId)}</div>
                 </div>
 
                 <div className="space-y-3 p-4">
@@ -1061,7 +1443,7 @@ export async function SearchPageView({
                     </div>
 
                     <Link
-                      href={`/hotels/${deal.id}${hotelLinkSuffix ? `?${hotelLinkSuffix}` : ""}`}
+                      href={`/hotels/${deal.hotelId}${hotelLinkSuffix ? `?${hotelLinkSuffix}` : ""}`}
                       className="rounded-xl bg-[var(--color-primary-light)] px-3 py-2 text-xs font-semibold text-white transition hover:brightness-105"
                     >
                       {isHebrew ? "הזמן עכשיו" : "Book now"}
@@ -1210,6 +1592,10 @@ export async function SearchPageView({
                 {params.checkIn && <input type="hidden" name="checkIn" value={params.checkIn} />}
                 {params.checkOut && <input type="hidden" name="checkOut" value={params.checkOut} />}
                 {params.guests && <input type="hidden" name="guests" value={params.guests} />}
+                {params.providerCode && (
+                  <input type="hidden" name="providerCode" value={params.providerCode} />
+                )}
+                {params.providerId && <input type="hidden" name="providerId" value={params.providerId} />}
 
                 <fieldset className="space-y-2">
                   <legend className="text-sm font-semibold text-slate-700">
@@ -1391,7 +1777,7 @@ export async function SearchPageView({
                     hotelDetailsHref={hotelDetailsHref}
                     showOnMapHref={showOnMapHref}
                     isHebrew={isHebrew}
-                    requestedNightsLabel={requestedNightsLabel}
+                    requestedNights={requestedNights}
                     lowInventoryLabel={lowInventoryLabel}
                     favoriteControl={renderFavoriteControl(hotel.id)}
                     layout={resultsLayout}

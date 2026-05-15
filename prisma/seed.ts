@@ -64,6 +64,7 @@ async function main() {
     data: {
       hotelId: hotel.id,
       name: "חדר דלוקס זוגי",
+      bedType: "DOUBLE",
       pricePerNight: 550,
       maxGuests: 2,
       inventory: 4,
@@ -85,6 +86,9 @@ async function main() {
       checkIn: new Date("2026-05-10"),
       checkOut: new Date("2026-05-12"),
       guests: 2,
+      guestNames: [guest.name, "אורח נוסף"],
+      tripPurpose: "BUSINESS",
+      specialRequests: "חדר בקומה גבוהה",
       totalPrice: 1100,
     },
   });

@@ -27,8 +27,57 @@ enum HotelStatus {
 }
 
 enum BookingStatus {
+  PENDING_PAYMENT
   CONFIRMED
   CANCELED
+}
+
+enum RoomPaymentPolicy {
+  CHARGE
+  PREAUTH
+}
+
+enum CurrencyCode {
+  ILS
+  USD
+  EUR
+  GBP
+}
+
+enum PaymentGateway {
+  STRIPE
+  ISRAEL
+}
+
+enum BookingPaymentStatus {
+  PENDING
+  AUTHORIZED
+  CAPTURED
+  VOIDED
+  REFUNDED
+  FAILED
+}
+
+enum PaymentOperationType {
+  CHARGE
+  AUTHORIZE
+  CAPTURE
+  VOID
+  REFUND
+}
+
+enum PaymentOperationStatus {
+  SUCCEEDED
+  FAILED
+}
+
+enum TripPurpose {
+  BUSINESS
+  WORK
+}
+enum BedType {
+  DOUBLE
+  TWIN
 }
 
 enum ProviderStatus {
@@ -41,6 +90,21 @@ enum HotelDataSourceMode {
   MANUAL
   API
   HYBRID
+}
+enum HotelMarkupMode {
+  PERCENTAGE
+  AMOUNT
+  MAX
+}
+enum SupplierType {
+  HOTELBEDS
+  MANUAL
+  DIRECT
+}
+enum SupplierPaymentStatus {
+  PAID
+  PENDING
+  PARTIAL
 }
 
 enum IntegrationLogLevel {
@@ -124,6 +188,10 @@ model Hotel {
   images      Json
   rating      Float?
   dataSourceMode HotelDataSourceMode @default(MANUAL)
+  markupPercentage Float @default(0)
+  markupAmount Float @default(0)
+  markupMode HotelMarkupMode @default(PERCENTAGE)
+  supplierType SupplierType @default(MANUAL)
   manualOverride Boolean @default(false)
   lastImportedAt DateTime?
   status      HotelStatus  @default(PENDING)
@@ -146,6 +214,7 @@ model RoomType {
   hotelId            String
   externalRoomId     String?
   name               String
+  bedType            BedType   @default(DOUBLE)
   pricePerNight      Float
   maxGuests          Int
   inventory          Int       @default(1)
@@ -153,6 +222,8 @@ model RoomType {
   isAvailable        Boolean   @default(true)
   photos             Json?
   cancellationPolicy String
+  paymentPolicy      RoomPaymentPolicy @default(CHARGE)
+  currencyCode       CurrencyCode      @default(ILS)
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
   hotel              Hotel     @relation(fields: [hotelId], references: [id], onDelete: Cascade)
@@ -219,20 +290,75 @@ model UserActivityLog {
 }
 
 model Booking {
-  id         String        @id @default(cuid())
-  userId     String
-  hotelId    String
-  roomTypeId String
-  checkIn    DateTime
-  checkOut   DateTime
-  guests     Int
-  totalPrice Float
-  status     BookingStatus @default(CONFIRMED)
-  createdAt  DateTime      @default(now())
-  updatedAt  DateTime      @updatedAt
-  user       User          @relation(fields: [userId], references: [id], onDelete: Cascade)
-  hotel      Hotel         @relation(fields: [hotelId], references: [id], onDelete: Cascade)
-  roomType   RoomType      @relation(fields: [roomTypeId], references: [id], onDelete: Cascade)
+  id                  String               @id @default(cuid())
+  userId              String
+  hotelId             String
+  roomTypeId          String
+  checkIn             DateTime
+  checkOut            DateTime
+  guests              Int
+  guestNames          Json?
+  tripPurpose         TripPurpose?
+  specialRequests     String?
+  totalPrice          Float
+  netRate             Float                @default(0)
+  sellRate            Float                @default(0)
+  profitAmount        Float                @default(0)
+  profitPercent       Float                @default(0)
+  supplierType        SupplierType         @default(MANUAL)
+  amountToPaySupplier Float                @default(0)
+  supplierPaymentStatus SupplierPaymentStatus @default(PENDING)
+  status              BookingStatus        @default(PENDING_PAYMENT)
+  paymentPolicy       RoomPaymentPolicy    @default(CHARGE)
+  currencyCode        CurrencyCode         @default(ILS)
+  paymentGateway      PaymentGateway?
+  paymentStatus       BookingPaymentStatus @default(PENDING)
+  paymentReference    String?
+  paymentToken        String?
+  authorizedAmount    Float                @default(0)
+  capturedAmount      Float                @default(0)
+  refundedAmount      Float                @default(0)
+  paymentErrorMessage String?
+  paymentMetadata     Json?
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+  user                User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  hotel               Hotel                @relation(fields: [hotelId], references: [id], onDelete: Cascade)
+  roomType            RoomType             @relation(fields: [roomTypeId], references: [id], onDelete: Cascade)
+  paymentOperations   BookingPaymentOperation[]
+  settlement          Settlement?
+}
+
+model BookingPaymentOperation {
+  id                String               @id @default(cuid())
+  bookingId         String
+  operationType     PaymentOperationType
+  operationStatus   PaymentOperationStatus
+  gateway           PaymentGateway
+  currencyCode      CurrencyCode
+  amount            Float
+  providerReference String?
+  gatewayReference  String?
+  idempotencyKey    String?
+  requestPayload    Json?
+  responsePayload   Json?
+  failureReason     String?
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
+  booking           Booking              @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+}
+model Settlement {
+  id                  String                @id @default(cuid())
+  bookingId           String                @unique
+  supplierType        SupplierType          @default(MANUAL)
+  netRate             Float                 @default(0)
+  amountToPaySupplier Float                 @default(0)
+  amountPaid          Float                 @default(0)
+  paymentStatus       SupplierPaymentStatus @default(PENDING)
+  paymentDate         DateTime?
+  createdAt           DateTime              @default(now())
+  updatedAt           DateTime              @updatedAt
+  booking             Booking               @relation(fields: [bookingId], references: [id], onDelete: Cascade)
 }
 
 model Review {

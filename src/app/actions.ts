@@ -2,13 +2,21 @@
 
 import bcrypt from "bcryptjs";
 import {
+  BedType,
+  BookingPaymentStatus,
+  HotelMarkupMode,
   BookingStatus,
+  CurrencyCode,
   DashboardRole,
   HotelDataSourceMode,
   HotelStatus,
+  RoomPaymentPolicy,
   Prisma,
   ProviderStatus,
   Role,
+  SupplierPaymentStatus,
+  SupplierType,
+  TripPurpose,
 } from "@prisma/client";
 import { addDays, differenceInCalendarDays } from "date-fns";
 import { revalidatePath } from "next/cache";
@@ -26,12 +34,24 @@ import {
   syncHotelProviderData,
   testHotelProviderConnection,
 } from "@/lib/hotel-api";
+import { sendBookingConfirmationEmail } from "@/lib/booking-confirmation-email";
+import {
+  initializeBookingPayment,
+  refundBookingPayment,
+  voidBookingPayment,
+} from "@/lib/payments/service";
 import {
   MOCK_FAVORITES_COOKIE_KEY,
   isMockHotelId,
   parseMockFavoriteHotelIds,
   serializeMockFavoriteHotelIds,
 } from "@/lib/mock-favorites";
+import {
+  calculateNetFromSellRate,
+  calculateSellFromNetRate,
+  normalizeMoney,
+  resolveSupplierPaymentStatus,
+} from "@/lib/finance";
 
 const authSchema = z.object({
   name: z.string().min(2).optional(),
@@ -50,6 +70,13 @@ const ENFORCED_OWNER_EMAILS = new Set(
     .map((email) => email.trim().toLowerCase())
     .filter(Boolean),
 );
+const BED_TYPE_VALUES: BedType[] = ["DOUBLE", "TWIN"];
+const TRIP_PURPOSE_VALUES: TripPurpose[] = ["BUSINESS", "WORK"];
+const ROOM_PAYMENT_POLICY_VALUES: RoomPaymentPolicy[] = ["CHARGE", "PREAUTH"];
+const CURRENCY_CODE_VALUES: CurrencyCode[] = ["ILS", "USD", "EUR", "GBP"];
+const HOTEL_MARKUP_MODE_VALUES: HotelMarkupMode[] = ["PERCENTAGE", "AMOUNT", "MAX"];
+const SUPPLIER_TYPE_VALUES: SupplierType[] = ["HOTELBEDS", "MANUAL", "DIRECT"];
+const SUPPLIER_PAYMENT_STATUS_VALUES: SupplierPaymentStatus[] = ["PAID", "PENDING", "PARTIAL"];
 
 async function ensurePromotedAdminRole(params: { userId: string; email: string; role: Role }) {
   const normalizedEmail = params.email.trim().toLowerCase();
@@ -97,6 +124,59 @@ function parseBooleanValue(value: FormDataEntryValue | null, defaultValue = fals
 
   return String(value) === "true";
 }
+function parseBedTypeValue(value: FormDataEntryValue | null, defaultValue: BedType = "DOUBLE"): BedType {
+  const candidate = String(value ?? "").trim().toUpperCase() as BedType;
+  return BED_TYPE_VALUES.includes(candidate) ? candidate : defaultValue;
+}
+function parseTripPurposeValue(
+  value: FormDataEntryValue | null,
+  defaultValue: TripPurpose = "BUSINESS",
+): TripPurpose {
+  const candidate = String(value ?? "").trim().toUpperCase() as TripPurpose;
+  return TRIP_PURPOSE_VALUES.includes(candidate) ? candidate : defaultValue;
+}
+function parseRoomPaymentPolicyValue(
+  value: FormDataEntryValue | null,
+  defaultValue: RoomPaymentPolicy = "CHARGE",
+): RoomPaymentPolicy {
+  const candidate = String(value ?? "").trim().toUpperCase() as RoomPaymentPolicy;
+  return ROOM_PAYMENT_POLICY_VALUES.includes(candidate) ? candidate : defaultValue;
+}
+function parseCurrencyCodeValue(
+  value: FormDataEntryValue | null,
+  defaultValue: CurrencyCode = "ILS",
+): CurrencyCode {
+  const candidate = String(value ?? "").trim().toUpperCase() as CurrencyCode;
+  return CURRENCY_CODE_VALUES.includes(candidate) ? candidate : defaultValue;
+}
+function parseHotelMarkupModeValue(
+  value: FormDataEntryValue | null,
+  defaultValue: HotelMarkupMode = "PERCENTAGE",
+): HotelMarkupMode {
+  const candidate = String(value ?? "").trim().toUpperCase() as HotelMarkupMode;
+  return HOTEL_MARKUP_MODE_VALUES.includes(candidate) ? candidate : defaultValue;
+}
+function parseSupplierTypeValue(
+  value: FormDataEntryValue | null,
+  defaultValue: SupplierType = "MANUAL",
+): SupplierType {
+  const candidate = String(value ?? "").trim().toUpperCase() as SupplierType;
+  return SUPPLIER_TYPE_VALUES.includes(candidate) ? candidate : defaultValue;
+}
+function parseSupplierPaymentStatusValue(
+  value: FormDataEntryValue | null,
+  defaultValue: SupplierPaymentStatus = "PENDING",
+): SupplierPaymentStatus {
+  const candidate = String(value ?? "").trim().toUpperCase() as SupplierPaymentStatus;
+  return SUPPLIER_PAYMENT_STATUS_VALUES.includes(candidate) ? candidate : defaultValue;
+}
+function parseNonNegativeNumber(value: FormDataEntryValue | null, defaultValue = 0) {
+  const parsed = Number(value ?? defaultValue);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return defaultValue;
+  }
+  return parsed;
+}
 function isRapidProviderConfig(name: string, endpoint: string, hotelsPath: string) {
   const normalizedName = name.toLowerCase();
   const normalizedEndpoint = endpoint.toLowerCase();
@@ -108,6 +188,19 @@ function isRapidProviderConfig(name: string, endpoint: string, hotelsPath: strin
     normalizedEndpoint.includes("expediagroup.com") ||
     normalizedPath.includes("/properties/content") ||
     normalizedPath.includes("/properties/availability")
+  );
+}
+function isHotelbedsProviderConfig(name: string, endpoint: string, hotelsPath: string) {
+  const normalizedName = name.toLowerCase();
+  const normalizedEndpoint = endpoint.toLowerCase();
+  const normalizedPath = hotelsPath.toLowerCase();
+
+  return (
+    normalizedName.includes("hotelbeds") ||
+    normalizedEndpoint.includes("hotelbeds") ||
+    normalizedEndpoint.includes("hb-api") ||
+    normalizedPath.includes("/hotel-content-api/") ||
+    normalizedPath.includes("/hotel-api/")
   );
 }
 
@@ -268,7 +361,15 @@ async function findManagedHotel(params: {
       : { id: params.hotelId, ownerId: params.actor.id };
   const hotel = await prisma.hotel.findFirst({
     where,
-    select: { id: true, ownerId: true, providerId: true },
+    select: {
+      id: true,
+      ownerId: true,
+      providerId: true,
+      markupMode: true,
+      markupPercentage: true,
+      markupAmount: true,
+      supplierType: true,
+    },
   });
 
   if (!hotel) {
@@ -320,6 +421,68 @@ function parseRoomInventoryState(formData: FormData) {
     availableInventory,
     isAvailable,
   };
+}
+function resolveRoomSellRateFromHotelFinance(params: {
+  inputNetRate: number;
+  hotel: {
+    markupMode: HotelMarkupMode;
+    markupPercentage: number;
+    markupAmount: number;
+  };
+}) {
+  return calculateSellFromNetRate({
+    netRate: params.inputNetRate,
+    markupMode: params.hotel.markupMode,
+    markupPercentage: params.hotel.markupPercentage,
+    markupAmount: params.hotel.markupAmount,
+  });
+}
+
+async function upsertSettlementForBooking(params: {
+  bookingId: string;
+  supplierType: SupplierType;
+  netRate: number;
+  amountToPaySupplier: number;
+  amountPaid?: number;
+  paymentDate?: Date | null;
+}) {
+  const amountToPaySupplier = normalizeMoney(params.amountToPaySupplier);
+  const amountPaid = normalizeMoney(params.amountPaid ?? 0);
+  const paymentStatus = resolveSupplierPaymentStatus({
+    amountToPaySupplier,
+    amountPaid,
+  });
+
+  await prisma.settlement.upsert({
+    where: { bookingId: params.bookingId },
+    create: {
+      bookingId: params.bookingId,
+      supplierType: params.supplierType,
+      netRate: normalizeMoney(params.netRate),
+      amountToPaySupplier,
+      amountPaid,
+      paymentStatus,
+      paymentDate: params.paymentDate ?? null,
+    },
+    update: {
+      supplierType: params.supplierType,
+      netRate: normalizeMoney(params.netRate),
+      amountToPaySupplier,
+      amountPaid,
+      paymentStatus,
+      paymentDate: params.paymentDate ?? null,
+    },
+  });
+
+  await prisma.booking.update({
+    where: { id: params.bookingId },
+    data: {
+      supplierPaymentStatus: paymentStatus,
+      amountToPaySupplier,
+      supplierType: params.supplierType,
+      netRate: normalizeMoney(params.netRate),
+    },
+  });
 }
 
 async function createAdminActivityLog(params: {
@@ -666,6 +829,15 @@ export async function createBookingAction(formData: FormData) {
   const checkIn = new Date(String(formData.get("checkIn") ?? ""));
   const checkOut = new Date(String(formData.get("checkOut") ?? ""));
   const guests = Number(formData.get("guests") ?? 1);
+  const guestNames = formData
+    .getAll("guestNames")
+    .map((entry) => String(entry ?? "").trim())
+    .filter(Boolean);
+  const tripPurpose = parseTripPurposeValue(formData.get("tripPurpose"), "BUSINESS");
+  const specialRequestsValue = String(formData.get("specialRequests") ?? "").trim();
+  const specialRequests = specialRequestsValue || null;
+  const paymentToken = String(formData.get("paymentToken") ?? "").trim();
+  const paymentSessionId = String(formData.get("paymentSessionId") ?? "").trim() || null;
 
   if (!roomTypeId || Number.isNaN(checkIn.getTime()) || Number.isNaN(checkOut.getTime())) {
     redirect(buildErrorRedirectPath("/", "פרטי הזמנה לא תקינים"));
@@ -673,6 +845,9 @@ export async function createBookingAction(formData: FormData) {
 
   if (checkOut <= checkIn) {
     redirect(buildErrorRedirectPath("/", "טווח תאריכים לא תקין"));
+  }
+  if (!paymentToken) {
+    redirect(buildErrorRedirectPath(bookingReturnPath || "/bookings/payment", "יש להזין טוקן תשלום מאובטח"));
   }
 
   const room = await prisma.roomType.findUnique({
@@ -691,6 +866,12 @@ export async function createBookingAction(formData: FormData) {
 
   if (guests > room.maxGuests) {
     redirect(buildErrorRedirectPath(`/hotels/${room.hotelId}`, "מספר אורחים גבוה מהמותר"));
+  }
+  if (guestNames.length === 0) {
+    redirect(buildErrorRedirectPath(`/hotels/${room.hotelId}`, "יש להזין לפחות שם אורח אחד"));
+  }
+  if (guestNames.length > guests) {
+    redirect(buildErrorRedirectPath(`/hotels/${room.hotelId}`, "מספר שמות האורחים חורג ממספר האורחים"));
   }
 
   const overlapping = await prisma.booking.count({
@@ -718,7 +899,22 @@ export async function createBookingAction(formData: FormData) {
   }
 
   const nights = differenceInCalendarDays(checkOut, checkIn);
+  if (nights <= 0) {
+    redirect(buildErrorRedirectPath(`/hotels/${room.hotelId}`, "טווח תאריכים לא תקין"));
+  }
   const totalPrice = nights * room.pricePerNight;
+  const bookingFinance = calculateNetFromSellRate({
+    sellRate: totalPrice,
+    markupMode: room.hotel.markupMode,
+    markupPercentage: room.hotel.markupPercentage,
+    markupAmount: room.hotel.markupAmount * nights,
+  });
+  const supplierType = room.hotel.supplierType;
+  const amountToPaySupplier = bookingFinance.netRate;
+  const supplierPaymentStatus = resolveSupplierPaymentStatus({
+    amountToPaySupplier,
+    amountPaid: 0,
+  });
   let rapidBookingWarning: string | null = null;
   let rapidBookingReference: string | null = null;
 
@@ -745,7 +941,7 @@ export async function createBookingAction(formData: FormData) {
     }
   }
 
-  await prisma.booking.create({
+  const booking = await prisma.booking.create({
     data: {
       userId: user.id,
       hotelId: room.hotelId,
@@ -753,17 +949,110 @@ export async function createBookingAction(formData: FormData) {
       checkIn,
       checkOut,
       guests,
+      guestNames,
+      tripPurpose,
+      specialRequests,
       totalPrice,
+      netRate: bookingFinance.netRate,
+      sellRate: bookingFinance.sellRate,
+      profitAmount: bookingFinance.profitAmount,
+      profitPercent: bookingFinance.profitPercent,
+      supplierType,
+      amountToPaySupplier,
+      supplierPaymentStatus,
+      status: BookingStatus.PENDING_PAYMENT,
+      paymentPolicy: room.paymentPolicy,
+      currencyCode: room.currencyCode,
+      paymentStatus: BookingPaymentStatus.PENDING,
+      paymentToken,
+      paymentMetadata: paymentSessionId ? { paymentSessionId } : undefined,
     },
   });
+  const paymentInitResult = await initializeBookingPayment({
+    bookingId: booking.id,
+    amount: totalPrice,
+    currencyCode: room.currencyCode,
+    paymentPolicy: room.paymentPolicy,
+    paymentToken,
+    customerEmail: user.email,
+    customerName: user.name,
+    description: `BookMeNow booking ${booking.id}`,
+    metadata: paymentSessionId ? { paymentSessionId } : undefined,
+  });
+
+  if (!paymentInitResult.success || !paymentInitResult.result?.success) {
+    const paymentErrorMessage =
+      paymentInitResult.success && paymentInitResult.result?.message
+        ? paymentInitResult.result.message
+        : "פעולת התשלום נכשלה";
+    await prisma.booking.update({
+      where: { id: booking.id },
+      data: {
+        status: BookingStatus.CANCELED,
+        paymentErrorMessage: paymentErrorMessage,
+      },
+    });
+    redirect(
+      buildErrorRedirectPath(
+        bookingReturnPath || `/bookings/payment?roomTypeId=${encodeURIComponent(roomTypeId)}`,
+        paymentErrorMessage,
+      ),
+    );
+  }
+
+  const confirmedBooking = await prisma.booking.update({
+    where: { id: booking.id },
+    data: {
+      status: BookingStatus.CONFIRMED,
+      paymentErrorMessage: null,
+    },
+  });
+  await upsertSettlementForBooking({
+    bookingId: confirmedBooking.id,
+    supplierType,
+    netRate: bookingFinance.netRate,
+    amountToPaySupplier,
+    amountPaid: 0,
+    paymentDate: null,
+  });
+  try {
+    await sendBookingConfirmationEmail({
+      recipientEmail: user.email,
+      guestName: user.name,
+      bookingId: confirmedBooking.id,
+      bookingCreatedAt: confirmedBooking.createdAt,
+      bookingStatus: "CONFIRMED",
+      hotelName: room.hotel.name,
+      hotelAddress: room.hotel.location,
+      hotelCity: room.hotel.city,
+      hotelCountry: room.hotel.country,
+      hotelContactEmail: room.hotel.contactEmail,
+      roomName: room.name,
+      cancellationPolicy: room.cancellationPolicy,
+      checkIn,
+      checkOut,
+      guests,
+      nights,
+      totalPrice,
+      rapidBookingReference,
+    });
+  } catch (error) {
+    console.error("[createBookingAction] Failed to send booking confirmation email", {
+      bookingId: confirmedBooking.id,
+      userId: user.id,
+      error,
+    });
+  }
 
   revalidatePath("/bookings");
+  const paymentModeLabel = room.paymentPolicy === "PREAUTH" ? "בוצעה הבטחת הזמנה (Pre-Auth)" : "בוצע חיוב מלא";
   const successMessage = rapidBookingReference
-    ? `ההזמנה הושלמה בהצלחה (Rapid ${rapidBookingReference})`
-    : "ההזמנה הושלמה בהצלחה";
+    ? `ההזמנה הושלמה בהצלחה · ${paymentModeLabel} (Rapid ${rapidBookingReference})`
+    : `ההזמנה הושלמה בהצלחה · ${paymentModeLabel}`;
   const bookingRedirectQuery = new URLSearchParams({
     success: successMessage,
   });
+  bookingRedirectQuery.set("confirmedBookingId", confirmedBooking.id);
   if (rapidBookingWarning) {
     bookingRedirectQuery.set("warning", rapidBookingWarning);
   }
@@ -773,10 +1062,58 @@ export async function createBookingAction(formData: FormData) {
 export async function cancelBookingAction(formData: FormData) {
   const user = await requireUser(Role.GUEST);
   const bookingId = String(formData.get("bookingId") ?? "");
+  if (!bookingId) {
+    redirect("/bookings?error=מספר הזמנה חסר");
+  }
 
-  await prisma.booking.updateMany({
+  const booking = await prisma.booking.findFirst({
     where: { id: bookingId, userId: user.id },
-    data: { status: BookingStatus.CANCELED },
+    select: {
+      id: true,
+      status: true,
+      paymentStatus: true,
+      capturedAmount: true,
+      refundedAmount: true,
+    },
+  });
+
+  if (!booking) {
+    redirect("/bookings?error=הזמנה לא נמצאה");
+  }
+
+  if (booking.status !== BookingStatus.CANCELED) {
+    if (booking.paymentStatus === BookingPaymentStatus.AUTHORIZED) {
+      const voidResult = await voidBookingPayment({ bookingId: booking.id });
+      if (!voidResult.success || !voidResult.result?.success) {
+        const paymentError =
+          voidResult.success && voidResult.result?.message
+            ? voidResult.result.message
+            : "ביטול ההתחייבות מול הסולק נכשל";
+        redirect(`/bookings?error=${encodeURIComponent(paymentError)}`);
+      }
+    } else if (booking.paymentStatus === BookingPaymentStatus.CAPTURED) {
+      const refundableAmount = Math.max(0, booking.capturedAmount - booking.refundedAmount);
+      if (refundableAmount > 0) {
+        const refundResult = await refundBookingPayment({
+          bookingId: booking.id,
+          amount: refundableAmount,
+        });
+        if (!refundResult.success || !refundResult.result?.success) {
+          const paymentError =
+            refundResult.success && refundResult.result?.message
+              ? refundResult.result.message
+              : "החזר התשלום נכשל";
+          redirect(`/bookings?error=${encodeURIComponent(paymentError)}`);
+        }
+      }
+    }
+  }
+
+  await prisma.booking.update({
+    where: { id: booking.id },
+    data: {
+      status: BookingStatus.CANCELED,
+    },
   });
 
   revalidatePath("/bookings");
@@ -892,6 +1229,10 @@ export async function ownerCreateHotelAction(formData: FormData) {
     .split(",")
     .map((f) => f.trim())
     .filter(Boolean);
+  const markupMode = parseHotelMarkupModeValue(formData.get("markupMode"), "PERCENTAGE");
+  const markupPercentage = parseNonNegativeNumber(formData.get("markupPercentage"), 0);
+  const markupAmount = parseNonNegativeNumber(formData.get("markupAmount"), 0);
+  const supplierType = parseSupplierTypeValue(formData.get("supplierType"), "MANUAL");
 
   if (!name || !location || !description) {
     redirect("/owner?error=יש למלא את כל שדות המלון");
@@ -909,6 +1250,10 @@ export async function ownerCreateHotelAction(formData: FormData) {
       facilities,
       images,
       dataSourceMode: HotelDataSourceMode.MANUAL,
+      markupMode,
+      markupPercentage,
+      markupAmount,
+      supplierType,
       manualOverride: false,
       status: HotelStatus.PENDING,
     },
@@ -935,9 +1280,16 @@ export async function ownerRegisterAccommodationAction(formData: FormData) {
   const uploadedImages = await parseUploadedImageFiles(formData, "imageFiles");
   const images = [...imageLinks, ...uploadedImages];
   const roomName = String(formData.get("roomName") ?? "").trim() || "חדר סטנדרט";
-  const pricePerNight = Number(formData.get("pricePerNight") ?? 0);
+  const netRatePerNight = Number(formData.get("pricePerNight") ?? 0);
+  const markupMode = parseHotelMarkupModeValue(formData.get("markupMode"), "PERCENTAGE");
+  const markupPercentage = parseNonNegativeNumber(formData.get("markupPercentage"), 0);
+  const markupAmount = parseNonNegativeNumber(formData.get("markupAmount"), 0);
+  const supplierType = parseSupplierTypeValue(formData.get("supplierType"), "MANUAL");
   const maxGuests = Math.max(1, Number(formData.get("maxGuests") ?? 2));
   const inventory = Math.max(1, Number(formData.get("inventory") ?? 1));
+  const bedType = parseBedTypeValue(formData.get("bedType"), "DOUBLE");
+  const paymentPolicy = parseRoomPaymentPolicyValue(formData.get("paymentPolicy"), "CHARGE");
+  const currencyCode = parseCurrencyCodeValue(formData.get("currencyCode"), "ILS");
   const cancellationPolicy =
     String(formData.get("cancellationPolicy") ?? "").trim() || "ביטול חינם עד 48 שעות לפני ההגעה";
 
@@ -949,8 +1301,8 @@ export async function ownerRegisterAccommodationAction(formData: FormData) {
     !location ||
     !contactEmail ||
     !description ||
-    !Number.isFinite(pricePerNight) ||
-    pricePerNight <= 0
+    !Number.isFinite(netRatePerNight) ||
+    netRatePerNight <= 0
   ) {
     redirect("/owner/register-property?error=יש למלא את כל שדות הטופס");
   }
@@ -967,8 +1319,21 @@ export async function ownerRegisterAccommodationAction(formData: FormData) {
       facilities,
       images,
       dataSourceMode: HotelDataSourceMode.MANUAL,
+      markupMode,
+      markupPercentage,
+      markupAmount,
+      supplierType,
       manualOverride: false,
       status: HotelStatus.PENDING,
+    },
+  });
+
+  const roomPricing = resolveRoomSellRateFromHotelFinance({
+    inputNetRate: netRatePerNight,
+    hotel: {
+      markupMode: hotel.markupMode,
+      markupPercentage: hotel.markupPercentage,
+      markupAmount: hotel.markupAmount,
     },
   });
 
@@ -976,10 +1341,13 @@ export async function ownerRegisterAccommodationAction(formData: FormData) {
     data: {
       hotelId: hotel.id,
       name: roomName,
-      pricePerNight,
+      pricePerNight: roomPricing.sellRate,
       maxGuests,
       inventory,
       availableInventory: inventory,
+      bedType,
+      paymentPolicy,
+      currencyCode,
       isAvailable: true,
       photos: images,
       cancellationPolicy,
@@ -994,8 +1362,11 @@ export async function ownerCreateRoomAction(formData: FormData) {
   const user = await requireUser(Role.OWNER);
   const hotelId = String(formData.get("hotelId") ?? "");
   const name = String(formData.get("name") ?? "").trim();
-  const pricePerNight = Number(formData.get("pricePerNight") ?? 0);
+  const netRatePerNight = Number(formData.get("pricePerNight") ?? 0);
   const maxGuests = Number(formData.get("maxGuests") ?? 1);
+  const bedType = parseBedTypeValue(formData.get("bedType"), "DOUBLE");
+  const paymentPolicy = parseRoomPaymentPolicyValue(formData.get("paymentPolicy"), "CHARGE");
+  const currencyCode = parseCurrencyCodeValue(formData.get("currencyCode"), "ILS");
   const { inventory, availableInventory, isAvailable } = parseRoomInventoryState(formData);
   const photos = parseListValue(String(formData.get("photos") ?? ""));
   const cancellationPolicy = String(formData.get("cancellationPolicy") ?? "").trim();
@@ -1004,12 +1375,12 @@ export async function ownerCreateRoomAction(formData: FormData) {
     !hotelId ||
     !name ||
     !cancellationPolicy ||
-    !Number.isFinite(pricePerNight) ||
+    !Number.isFinite(netRatePerNight) ||
     !Number.isFinite(maxGuests) ||
     !isNonNegativeInteger(inventory) ||
     !isNonNegativeInteger(availableInventory) ||
     availableInventory > inventory ||
-    pricePerNight <= 0 ||
+    netRatePerNight <= 0 ||
     !Number.isInteger(maxGuests) ||
     maxGuests < 1
   ) {
@@ -1023,13 +1394,24 @@ export async function ownerCreateRoomAction(formData: FormData) {
   if (!hotel) {
     redirect("/owner?error=מלון לא נמצא");
   }
+  const roomPricing = resolveRoomSellRateFromHotelFinance({
+    inputNetRate: netRatePerNight,
+    hotel: {
+      markupMode: hotel.markupMode,
+      markupPercentage: hotel.markupPercentage,
+      markupAmount: hotel.markupAmount,
+    },
+  });
 
   await prisma.roomType.create({
     data: {
       hotelId,
       name,
-      pricePerNight,
+      pricePerNight: roomPricing.sellRate,
       maxGuests,
+      bedType,
+      paymentPolicy,
+      currencyCode,
       inventory,
       availableInventory,
       isAvailable,
@@ -1221,6 +1603,10 @@ export async function adminCreateHotelAction(formData: FormData) {
   const manualOverride =
     actor.role === Role.ADMIN ? parseBooleanValue(formData.get("manualOverride"), false) : false;
   const ratingRaw = Number(formData.get("rating") ?? Number.NaN);
+  const markupMode = parseHotelMarkupModeValue(formData.get("markupMode"), "PERCENTAGE");
+  const markupPercentage = parseNonNegativeNumber(formData.get("markupPercentage"), 0);
+  const markupAmount = parseNonNegativeNumber(formData.get("markupAmount"), 0);
+  const supplierType = parseSupplierTypeValue(formData.get("supplierType"), "MANUAL");
   const statusInput =
     actor.role === Role.ADMIN
       ? String(formData.get("status") ?? HotelStatus.APPROVED)
@@ -1267,6 +1653,10 @@ export async function adminCreateHotelAction(formData: FormData) {
       rating: Number.isFinite(ratingRaw) ? ratingRaw : null,
       dataSourceMode: dataSourceModeInput as HotelDataSourceMode,
       manualOverride,
+      markupMode,
+      markupPercentage,
+      markupAmount,
+      supplierType,
       status: statusInput as HotelStatus,
     },
   });
@@ -1302,6 +1692,10 @@ export async function adminUpdateHotelAction(formData: FormData) {
   const manualOverride = parseBooleanValue(formData.get("manualOverride"), false);
   const ratingRaw = Number(formData.get("rating") ?? Number.NaN);
   const externalHotelId = String(formData.get("externalHotelId") ?? "").trim() || null;
+  const markupMode = parseHotelMarkupModeValue(formData.get("markupMode"), "PERCENTAGE");
+  const markupPercentage = parseNonNegativeNumber(formData.get("markupPercentage"), 0);
+  const markupAmount = parseNonNegativeNumber(formData.get("markupAmount"), 0);
+  const supplierType = parseSupplierTypeValue(formData.get("supplierType"), "MANUAL");
   const statusInput = String(formData.get("status") ?? HotelStatus.PENDING);
 
   if (!hotelId || !name || !location || !description) {
@@ -1346,6 +1740,10 @@ export async function adminUpdateHotelAction(formData: FormData) {
       rating: Number.isFinite(ratingRaw) ? ratingRaw : null,
       dataSourceMode: dataSourceModeInput as HotelDataSourceMode,
       manualOverride,
+      markupMode,
+      markupPercentage,
+      markupAmount,
+      supplierType,
       status: statusInput as HotelStatus,
     },
   });
@@ -1399,8 +1797,11 @@ export async function adminCreateRoomAction(formData: FormData) {
   const hotelId = String(formData.get("hotelId") ?? "");
   const externalRoomId = String(formData.get("externalRoomId") ?? "").trim() || null;
   const name = String(formData.get("name") ?? "").trim();
-  const pricePerNight = Number(formData.get("pricePerNight") ?? 0);
+  const netRatePerNight = Number(formData.get("pricePerNight") ?? 0);
   const maxGuests = Number(formData.get("maxGuests") ?? 1);
+  const bedType = parseBedTypeValue(formData.get("bedType"), "DOUBLE");
+  const paymentPolicy = parseRoomPaymentPolicyValue(formData.get("paymentPolicy"), "CHARGE");
+  const currencyCode = parseCurrencyCodeValue(formData.get("currencyCode"), "ILS");
   const { inventory, availableInventory, isAvailable } = parseRoomInventoryState(formData);
   const cancellationPolicy = String(formData.get("cancellationPolicy") ?? "").trim();
   const photos = parseListValue(String(formData.get("photos") ?? ""));
@@ -1408,26 +1809,37 @@ export async function adminCreateRoomAction(formData: FormData) {
     !hotelId ||
     !name ||
     !cancellationPolicy ||
-    !Number.isFinite(pricePerNight) ||
+    !Number.isFinite(netRatePerNight) ||
     !Number.isInteger(maxGuests) ||
     !isNonNegativeInteger(inventory) ||
     !isNonNegativeInteger(availableInventory) ||
-    pricePerNight <= 0 ||
+    netRatePerNight <= 0 ||
     maxGuests < 1 ||
     availableInventory > inventory
   ) {
     redirect(`${redirectPath}?error=Invalid room details`);
   }
 
-  await findManagedHotel({ actor, hotelId, redirectPath });
+  const hotel = await findManagedHotel({ actor, hotelId, redirectPath });
+  const roomPricing = resolveRoomSellRateFromHotelFinance({
+    inputNetRate: netRatePerNight,
+    hotel: {
+      markupMode: hotel.markupMode,
+      markupPercentage: hotel.markupPercentage,
+      markupAmount: hotel.markupAmount,
+    },
+  });
 
   const createdRoom = await prisma.roomType.create({
     data: {
       hotelId,
       externalRoomId,
       name,
-      pricePerNight,
+      pricePerNight: roomPricing.sellRate,
       maxGuests,
+      bedType,
+      paymentPolicy,
+      currencyCode,
       inventory,
       availableInventory,
       isAvailable,
@@ -1455,8 +1867,11 @@ export async function adminUpdateRoomAction(formData: FormData) {
   const roomId = String(formData.get("roomId") ?? "");
   const externalRoomId = String(formData.get("externalRoomId") ?? "").trim() || null;
   const name = String(formData.get("name") ?? "").trim();
-  const pricePerNight = Number(formData.get("pricePerNight") ?? 0);
+  const netRatePerNight = Number(formData.get("pricePerNight") ?? 0);
   const maxGuests = Number(formData.get("maxGuests") ?? 1);
+  const bedType = parseBedTypeValue(formData.get("bedType"), "DOUBLE");
+  const paymentPolicy = parseRoomPaymentPolicyValue(formData.get("paymentPolicy"), "CHARGE");
+  const currencyCode = parseCurrencyCodeValue(formData.get("currencyCode"), "ILS");
   const { inventory, availableInventory, isAvailable } = parseRoomInventoryState(formData);
   const cancellationPolicy = String(formData.get("cancellationPolicy") ?? "").trim();
   const photos = parseListValue(String(formData.get("photos") ?? ""));
@@ -1464,11 +1879,11 @@ export async function adminUpdateRoomAction(formData: FormData) {
     !roomId ||
     !name ||
     !cancellationPolicy ||
-    !Number.isFinite(pricePerNight) ||
+    !Number.isFinite(netRatePerNight) ||
     !Number.isInteger(maxGuests) ||
     !isNonNegativeInteger(inventory) ||
     !isNonNegativeInteger(availableInventory) ||
-    pricePerNight <= 0 ||
+    netRatePerNight <= 0 ||
     maxGuests < 1 ||
     inventory < 0 ||
     availableInventory < 0 ||
@@ -1478,14 +1893,26 @@ export async function adminUpdateRoomAction(formData: FormData) {
   }
 
   const room = await findManagedRoom({ actor, roomId, redirectPath });
+  const hotel = await findManagedHotel({ actor, hotelId: room.hotelId, redirectPath });
+  const roomPricing = resolveRoomSellRateFromHotelFinance({
+    inputNetRate: netRatePerNight,
+    hotel: {
+      markupMode: hotel.markupMode,
+      markupPercentage: hotel.markupPercentage,
+      markupAmount: hotel.markupAmount,
+    },
+  });
 
   await prisma.roomType.update({
     where: { id: room.id },
     data: {
       externalRoomId,
       name,
-      pricePerNight,
+      pricePerNight: roomPricing.sellRate,
       maxGuests,
+      bedType,
+      paymentPolicy,
+      currencyCode,
       inventory,
       availableInventory,
       isAvailable,
@@ -1538,6 +1965,67 @@ export async function adminDeleteRoomAction(formData: FormData) {
   revalidatePath("/admin/rooms");
   redirect(`${redirectPath}?success=Room deleted`);
 }
+export async function adminUpdateSettlementPaymentAction(formData: FormData) {
+  await requireUser(Role.ADMIN);
+  const settlementId = String(formData.get("settlementId") ?? "");
+  const amountPaid = parseNonNegativeNumber(formData.get("amountPaid"), 0);
+  const supplierPaymentStatus = parseSupplierPaymentStatusValue(
+    formData.get("supplierPaymentStatus"),
+    "PENDING",
+  );
+  const paymentDateRaw = String(formData.get("paymentDate") ?? "").trim();
+  const paymentDateCandidate = paymentDateRaw ? new Date(paymentDateRaw) : null;
+  if (
+    !settlementId ||
+    !Number.isFinite(amountPaid) ||
+    amountPaid < 0 ||
+    (paymentDateCandidate && Number.isNaN(paymentDateCandidate.getTime()))
+  ) {
+    redirect("/admin/settlements?error=Invalid settlement update details");
+  }
+
+  const settlement = await prisma.settlement.findUnique({
+    where: { id: settlementId },
+    select: {
+      id: true,
+      bookingId: true,
+      amountToPaySupplier: true,
+      paymentDate: true,
+    },
+  });
+  if (!settlement) {
+    redirect("/admin/settlements?error=Settlement not found");
+  }
+  const paymentStatus = resolveSupplierPaymentStatus({
+    amountToPaySupplier: settlement.amountToPaySupplier,
+    amountPaid,
+  });
+  const effectivePaymentStatus = amountPaid > 0 ? paymentStatus : supplierPaymentStatus;
+  const paymentDate =
+    effectivePaymentStatus === SupplierPaymentStatus.PAID
+      ? paymentDateCandidate ?? settlement.paymentDate ?? new Date()
+      : paymentDateCandidate;
+
+  await prisma.$transaction([
+    prisma.settlement.update({
+      where: { id: settlementId },
+      data: {
+        amountPaid,
+        paymentStatus: effectivePaymentStatus,
+        paymentDate,
+      },
+    }),
+    prisma.booking.update({
+      where: { id: settlement.bookingId },
+      data: {
+        supplierPaymentStatus: effectivePaymentStatus,
+      },
+    }),
+  ]);
+
+  revalidatePath("/admin/settlements");
+  redirect("/admin/settlements?success=Settlement updated");
+}
 
 export async function adminCreateProviderAction(formData: FormData) {
   const admin = await requireUser(Role.ADMIN);
@@ -1556,6 +2044,9 @@ export async function adminCreateProviderAction(formData: FormData) {
   }
   if (isRapidProviderConfig(name, endpoint, hotelsPath) && !apiSecret) {
     redirect("/admin?tab=integrations&error=Rapid provider requires shared secret");
+  }
+  if (isHotelbedsProviderConfig(name, endpoint, hotelsPath) && !apiSecret) {
+    redirect("/admin?tab=integrations&error=Hotelbeds provider requires API secret");
   }
 
   const provider = await prisma.hotelApiProvider.create({
@@ -1619,6 +2110,13 @@ export async function adminUpdateProviderAction(formData: FormData) {
     !existingProvider.apiSecretEncrypted
   ) {
     redirect("/admin?tab=integrations&error=Rapid provider requires shared secret");
+  }
+  if (
+    isHotelbedsProviderConfig(name, endpoint, hotelsPath) &&
+    !apiSecret &&
+    !existingProvider.apiSecretEncrypted
+  ) {
+    redirect("/admin?tab=integrations&error=Hotelbeds provider requires API secret");
   }
 
   await prisma.hotelApiProvider.update({

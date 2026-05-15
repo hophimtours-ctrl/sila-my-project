@@ -18,6 +18,7 @@ const adminNavigationItems = [
   { href: "/admin/hotels", label: "ניהול מלונות" },
   { href: "/admin/properties", label: "ניהול בתי אירוח" },
   { href: "/admin/rooms", label: "ניהול חדרים" },
+  { href: "/admin/settlements", label: "ניהול התחשבנות" },
   { href: "/admin/availability", label: "ניהול זמינות" },
   { href: "/admin/deals", label: "ניהול דילים" },
   { href: "/admin/reviews", label: "ניהול ביקורות" },

@@ -1,10 +1,13 @@
 import {
+  BedType,
   HotelDataSourceMode,
+  HotelMarkupMode,
   HotelStatus,
   IntegrationLogLevel,
   Prisma,
   ProviderStatus,
   Role,
+  SupplierType,
 } from "@prisma/client";
 import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from "node:crypto";
 import { prisma } from "@/lib/db";
@@ -12,6 +15,7 @@ import { prisma } from "@/lib/db";
 export type NormalizedRoom = {
   externalRoomId: string;
   name: string;
+  bedType: BedType;
   pricePerNight: number;
   maxGuests: number;
   inventory: number;
@@ -72,6 +76,32 @@ function toSafeString(value: unknown, fallback: string) {
 
   return fallback;
 }
+function toTextValue(value: unknown, fallback = "") {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed || fallback;
+  }
+  if (!value || typeof value !== "object") {
+    return fallback;
+  }
+
+  const record = value as Record<string, unknown>;
+  const preferredKeys = ["content", "name", "description", "text", "value", "label"];
+  for (const key of preferredKeys) {
+    const candidate = record[key];
+    if (typeof candidate === "string" && candidate.trim()) {
+      return candidate.trim();
+    }
+  }
+
+  for (const entry of Object.values(record)) {
+    if (typeof entry === "string" && entry.trim()) {
+      return entry.trim();
+    }
+  }
+
+  return fallback;
+}
 
 function toSafeNumber(value: unknown, fallback: number) {
   const asNumber = Number(value);
@@ -79,6 +109,19 @@ function toSafeNumber(value: unknown, fallback: number) {
 }
 function uniqueStrings(values: string[]) {
   return Array.from(new Set(values.filter(Boolean)));
+}
+function normalizeBedType(value: unknown, roomName: string): BedType {
+  const text = `${toSafeString(value, "")} ${roomName}`.toLowerCase();
+  if (
+    text.includes("twin") ||
+    text.includes("separate") ||
+    text.includes("נפרד") ||
+    text.includes("שתי מיטות") ||
+    text.includes("2 מיטות")
+  ) {
+    return "TWIN";
+  }
+  return "DOUBLE";
 }
 
 function objectValues(input: unknown) {
@@ -103,7 +146,7 @@ function toNamedValueArray(input: unknown) {
         }
 
         if (value && typeof value === "object") {
-          return toSafeString((value as { name?: unknown }).name, "");
+          return toTextValue((value as { name?: unknown }).name ?? value, "");
         }
 
         return "";
@@ -198,6 +241,19 @@ function resolveRapidApiGatewayHost(endpoint: string) {
   }
 }
 
+function isHotelbedsProvider(provider: { name: string; endpoint: string; hotelsPath: string }) {
+  const endpoint = provider.endpoint.toLowerCase();
+  const path = provider.hotelsPath.toLowerCase();
+  const name = provider.name.toLowerCase();
+
+  return (
+    endpoint.includes("hotelbeds") ||
+    endpoint.includes("hb-api") ||
+    name.includes("hotelbeds") ||
+    path.includes("/hotel-content-api/") ||
+    path.includes("/hotel-api/")
+  );
+}
 function buildRapidAuthorizationHeader(apiKey: string, sharedSecret: string) {
   const timestamp = Math.floor(Date.now() / 1000).toString();
   const signature = createHash("sha512")
@@ -205,6 +261,17 @@ function buildRapidAuthorizationHeader(apiKey: string, sharedSecret: string) {
     .digest("hex");
 
   return `EAN APIKey=${apiKey},Signature=${signature},timestamp=${timestamp}`;
+}
+function buildHotelbedsSignature(apiKey: string, sharedSecret: string) {
+  const timestamp = Math.floor(Date.now() / 1000).toString();
+  const signature = createHash("sha256")
+    .update(`${apiKey}${sharedSecret}${timestamp}`)
+    .digest("hex");
+
+  return {
+    timestamp,
+    signature,
+  };
 }
 
 function addUtcDays(baseDate: Date, days: number) {
@@ -412,6 +479,18 @@ function sanitizeAffiliateReferenceId(reference: string) {
 
 function normalizeRoom(rawRoom: unknown, index: number): NormalizedRoom {
   const room = typeof rawRoom === "object" && rawRoom !== null ? rawRoom : {};
+  const roomName = toSafeString(
+    (room as { name?: unknown; roomType?: unknown; title?: unknown }).name ??
+      (room as { roomType?: unknown }).roomType ??
+      (room as { title?: unknown }).title,
+    `Room ${index + 1}`,
+  );
+  const bedType = normalizeBedType(
+    (room as { bedType?: unknown; bed_type?: unknown; bedding?: unknown }).bedType ??
+      (room as { bed_type?: unknown }).bed_type ??
+      (room as { bedding?: unknown }).bedding,
+    roomName,
+  );
   const occupancyTotal = (
     room as {
       occupancy?: {
@@ -460,11 +539,10 @@ function normalizeRoom(rawRoom: unknown, index: number): NormalizedRoom {
       `room-${index + 1}`,
     ),
     name: toSafeString(
-      (room as { name?: unknown; roomType?: unknown; title?: unknown }).name ??
-        (room as { roomType?: unknown }).roomType ??
-        (room as { title?: unknown }).title,
+      roomName,
       `Room ${index + 1}`,
     ),
+    bedType,
     pricePerNight: Math.max(
       1,
       toSafeNumber(
@@ -517,6 +595,13 @@ function resolveHotelsArray(payload: unknown) {
   if (Array.isArray(record.hotels)) {
     return record.hotels;
   }
+  if (
+    record.hotels &&
+    typeof record.hotels === "object" &&
+    Array.isArray((record.hotels as { hotels?: unknown }).hotels)
+  ) {
+    return (record.hotels as { hotels: unknown[] }).hotels;
+  }
   if (Array.isArray(record.data)) {
     return record.data;
   }
@@ -548,6 +633,8 @@ function normalizeHotel(rawHotel: unknown, index: number): NormalizedHotel {
   const city = toSafeString(address.city, "");
   const countryCode = toSafeString(address.country_code, "");
   const locationFromAddress = [city, countryCode].filter(Boolean).join(", ");
+  const cityText = toTextValue((hotel as { city?: unknown }).city, "");
+  const destinationText = toTextValue((hotel as { destination?: unknown }).destination, "");
   const ratings = (
     hotel as {
       ratings?: {
@@ -578,21 +665,27 @@ function normalizeHotel(rawHotel: unknown, index: number): NormalizedHotel {
       `hotel-${index + 1}`,
     ),
     name: toSafeString(
-      (hotel as { name?: unknown; title?: unknown; hotelName?: unknown }).name ??
-        (hotel as { hotelName?: unknown }).hotelName ??
-        (hotel as { title?: unknown }).title,
+      toTextValue(
+        (hotel as { name?: unknown; title?: unknown; hotelName?: unknown }).name ??
+          (hotel as { hotelName?: unknown }).hotelName ??
+          (hotel as { title?: unknown }).title,
+        "",
+      ),
       `Imported Hotel ${index + 1}`,
     ),
     location: toSafeString(
-      (hotel as { location?: unknown; city?: unknown; destination?: unknown }).location ??
-        (hotel as { city?: unknown }).city ??
-        (hotel as { destination?: unknown }).destination ??
+      toTextValue((hotel as { location?: unknown }).location, "") ||
+        cityText ||
+        destinationText ||
         locationFromAddress,
       "Unknown location",
     ),
     description: toSafeString(
-      (hotel as { description?: unknown; summary?: unknown }).description ??
-        (hotel as { summary?: unknown }).summary,
+      toTextValue(
+        (hotel as { description?: unknown; summary?: unknown }).description ??
+          (hotel as { summary?: unknown }).summary,
+        "",
+      ),
       "No description provided by API.",
     ),
     facilities: toNamedValueArray(
@@ -962,6 +1055,50 @@ export function maskApiKey(apiKey: string) {
 
   return `${apiKey.slice(0, 2)}${"*".repeat(Math.max(4, apiKey.length - 4))}${apiKey.slice(-2)}`;
 }
+function readCredentialFromEnv(names: string[]) {
+  for (const name of names) {
+    const value = process.env[name]?.trim();
+    if (!value || /^\{\{[^{}]+\}\}$/.test(value)) {
+      continue;
+    }
+    return value;
+  }
+
+  return null;
+}
+function decryptProviderCredential(options: {
+  encryptedValue: string | null;
+  fallbackEnvNames?: string[];
+  missingCredentialMessage: string;
+}) {
+  const fallbackValue = options.fallbackEnvNames
+    ? readCredentialFromEnv(options.fallbackEnvNames)
+    : null;
+
+  if (!options.encryptedValue) {
+    if (fallbackValue) {
+      return fallbackValue;
+    }
+    throw new Error(options.missingCredentialMessage);
+  }
+
+  try {
+    return decryptApiKey(options.encryptedValue);
+  } catch (error) {
+    if (fallbackValue) {
+      return fallbackValue;
+    }
+    if (
+      error instanceof Error &&
+      error.message.toLowerCase().includes("unable to authenticate data")
+    ) {
+      throw new Error(
+        "Failed to decrypt provider credentials. Re-enter credentials in admin or set runtime secret environment variables.",
+      );
+    }
+    throw error;
+  }
+}
 
 export async function logProviderEvent(
   providerId: string,
@@ -990,21 +1127,32 @@ async function fetchProviderHotelPayload(providerId: string) {
     throw new Error("Provider not found");
   }
 
-  const apiKey = decryptApiKey(provider.apiKeyEncrypted);
   let endpointUrl = resolveProviderEndpointUrl(provider.endpoint, provider.hotelsPath);
   let requestHeaders: Record<string, string> = {
     Accept: "application/json",
   };
 
   if (isRapidProvider(provider)) {
+    const apiKey = decryptProviderCredential({
+      encryptedValue: provider.apiKeyEncrypted,
+      fallbackEnvNames: ["RAPID_PROVIDER_API_KEY", "RAPID_API_KEY"],
+      missingCredentialMessage: "Rapid provider API key is missing",
+    });
     const authMode = resolveRapidAuthMode(provider.endpoint);
-    if (authMode === "ean-signature" && !provider.apiSecretEncrypted) {
-      throw new Error("Rapid provider requires a shared secret");
+    let sharedSecret: string | undefined;
+    if (authMode === "ean-signature") {
+      sharedSecret = decryptProviderCredential({
+        encryptedValue: provider.apiSecretEncrypted,
+        fallbackEnvNames: [
+          "RAPID_PROVIDER_API_SECRET",
+          "RAPID_PROVIDER_SHARED_SECRET",
+          "RAPID_API_SECRET",
+          "RAPID_SHARED_SECRET",
+        ],
+        missingCredentialMessage: "Rapid provider requires a shared secret",
+      });
     }
     endpointUrl = appendRapidDefaultQueryParams(endpointUrl);
-    const sharedSecret = provider.apiSecretEncrypted
-      ? decryptApiKey(provider.apiSecretEncrypted)
-      : undefined;
     requestHeaders = buildRapidRequestHeaders({
       apiKey,
       endpoint: provider.endpoint,
@@ -1012,7 +1160,27 @@ async function fetchProviderHotelPayload(providerId: string) {
       sessionId: randomUUID(),
       requireCustomerIp: false,
     });
+  } else if (isHotelbedsProvider(provider)) {
+    const apiKey = decryptProviderCredential({
+      encryptedValue: provider.apiKeyEncrypted,
+      fallbackEnvNames: ["HOTELBEDS_PROVIDER_API_KEY", "HOTELBEDS_API_KEY"],
+      missingCredentialMessage: "Hotelbeds provider API key is missing",
+    });
+    const sharedSecret = decryptProviderCredential({
+      encryptedValue: provider.apiSecretEncrypted,
+      fallbackEnvNames: ["HOTELBEDS_PROVIDER_API_SECRET", "HOTELBEDS_API_SECRET"],
+      missingCredentialMessage: "Hotelbeds provider requires an API secret",
+    });
+    const { signature } = buildHotelbedsSignature(apiKey, sharedSecret);
+    requestHeaders["Api-key"] = apiKey;
+    requestHeaders["X-Signature"] = signature;
+    requestHeaders["Accept-Encoding"] = "gzip";
+    requestHeaders["User-Agent"] = process.env.HOTELBEDS_USER_AGENT?.trim() || "BookMeNow/1.0";
   } else {
+    const apiKey = decryptProviderCredential({
+      encryptedValue: provider.apiKeyEncrypted,
+      missingCredentialMessage: "Provider API key is missing",
+    });
     requestHeaders.Authorization = `Bearer ${apiKey}`;
     requestHeaders["x-api-key"] = apiKey;
   }
@@ -1025,6 +1193,45 @@ async function fetchProviderHotelPayload(providerId: string) {
   return { provider, response, payload };
 }
 
+function extractProviderErrorMessage(payload: unknown, fallback: string) {
+  if (typeof payload === "string") {
+    const normalized = payload.trim();
+    return normalized || fallback;
+  }
+
+  if (!payload || typeof payload !== "object") {
+    return fallback;
+  }
+
+  const record = payload as Record<string, unknown>;
+  const directMessageCandidates = [
+    record.message,
+    record.error,
+    record.error_description,
+    record.description,
+  ];
+  for (const candidate of directMessageCandidates) {
+    if (typeof candidate === "string" && candidate.trim()) {
+      return candidate.trim();
+    }
+  }
+
+  const errors = record.errors;
+  if (Array.isArray(errors)) {
+    for (const item of errors) {
+      if (!item || typeof item !== "object") {
+        continue;
+      }
+      const itemRecord = item as Record<string, unknown>;
+      const candidate = itemRecord.message ?? itemRecord.description ?? itemRecord.error;
+      if (typeof candidate === "string" && candidate.trim()) {
+        return candidate.trim();
+      }
+    }
+  }
+
+  return fallback;
+}
 export async function fetchNormalizedHotelsForProvider(options: {
   providerId: string;
   checkInDate?: Date;
@@ -1035,7 +1242,9 @@ export async function fetchNormalizedHotelsForProvider(options: {
   const { provider, response, payload } = await fetchProviderHotelPayload(options.providerId);
 
   if (!response.ok) {
-    throw new Error(`Provider fetch failed (${response.status})`);
+    throw new Error(
+      extractProviderErrorMessage(payload, `Provider fetch failed (${response.status})`),
+    );
   }
 
   const rawHotels = resolveHotelsArray(payload);
@@ -1077,7 +1286,10 @@ export async function testHotelProviderConnection(providerId: string) {
     const hotels = resolveHotelsArray(payload);
 
     if (!response.ok) {
-      const message = `Provider test failed (${response.status})`;
+      const message = extractProviderErrorMessage(
+        payload,
+        `Provider test failed (${response.status})`,
+      );
       await prisma.hotelApiProvider.update({
         where: { id: provider.id },
         data: {
@@ -1173,7 +1385,7 @@ export async function syncHotelProviderData(providerId: string, trigger: "manual
   try {
     const { response, payload } = await fetchProviderHotelPayload(provider.id);
     if (!response.ok) {
-      const message = `Sync failed with status ${response.status}`;
+      const message = extractProviderErrorMessage(payload, `Sync failed with status ${response.status}`);
       await prisma.hotelApiProvider.update({
         where: { id: provider.id },
         data: {
@@ -1203,6 +1415,9 @@ export async function syncHotelProviderData(providerId: string, trigger: "manual
       );
     }
     const ownerId = await resolveDefaultOwnerId();
+    const inferredSupplierType = isHotelbedsProvider(provider)
+      ? SupplierType.HOTELBEDS
+      : SupplierType.DIRECT;
     let importedCount = 0;
 
     for (const normalizedHotel of normalizedHotels) {
@@ -1233,6 +1448,10 @@ export async function syncHotelProviderData(providerId: string, trigger: "manual
                 }),
             rating: normalizedHotel.rating,
             status: HotelStatus.APPROVED,
+            supplierType:
+              existingHotel.supplierType === SupplierType.MANUAL
+                ? inferredSupplierType
+                : existingHotel.supplierType,
             providerId: provider.id,
             externalHotelId: normalizedHotel.externalHotelId,
             dataSourceMode: shouldPreserveManual
@@ -1256,6 +1475,10 @@ export async function syncHotelProviderData(providerId: string, trigger: "manual
             images: normalizedHotel.images,
             rating: normalizedHotel.rating,
             dataSourceMode: HotelDataSourceMode.API,
+            supplierType: inferredSupplierType,
+            markupMode: HotelMarkupMode.PERCENTAGE,
+            markupPercentage: 0,
+            markupAmount: 0,
             status: HotelStatus.APPROVED,
             lastImportedAt: new Date(),
           },
@@ -1281,6 +1504,7 @@ export async function syncHotelProviderData(providerId: string, trigger: "manual
             where: { id: existingRoom.id },
             data: {
               name: room.name,
+              bedType: room.bedType,
               pricePerNight: room.pricePerNight,
               maxGuests: room.maxGuests,
               inventory: room.inventory,
@@ -1296,6 +1520,7 @@ export async function syncHotelProviderData(providerId: string, trigger: "manual
               hotelId,
               externalRoomId: room.externalRoomId,
               name: room.name,
+              bedType: room.bedType,
               pricePerNight: room.pricePerNight,
               maxGuests: room.maxGuests,
               inventory: room.inventory,
